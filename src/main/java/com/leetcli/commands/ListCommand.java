@@ -1,5 +1,7 @@
 package com.leetcli.commands;
 
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 import com.leetcli.api.LeetCodeClient;
 import com.leetcli.api.models.Problem;
 import com.leetcli.config.ConfigManager;
@@ -16,6 +18,7 @@ import java.util.List;
  */
 @Command(
     name = "list",
+    mixinStandardHelpOptions = true,
     description = "Browse and filter LeetCode problems"
 )
 public class ListCommand implements Runnable {
@@ -37,6 +40,9 @@ public class ListCommand implements Runnable {
     @Option(names = {"--no-tui"}, description = "Force table output even without other flags")
     private boolean noTui;
 
+    @Option(names = {"--json"}, description = "Output as JSON array (agent-friendly)")
+    private boolean json;
+
     @Override
     public void run() {
         ConfigManager config = new ConfigManager();
@@ -44,6 +50,11 @@ public class ListCommand implements Runnable {
 
         if (!client.hasCredentials()) {
             System.err.println("\n  Not logged in. Run 'leetcli login' first.\n");
+            return;
+        }
+
+        if (json) {
+            printJson(client);
             return;
         }
 
@@ -59,6 +70,17 @@ public class ListCommand implements Runnable {
             }
         } else {
             printTable(client);
+        }
+    }
+
+    private void printJson(LeetCodeClient client) {
+        try {
+            int skip = (page - 1) * limit;
+            List<Problem> problems = client.listProblems(limit, skip, difficulty, search);
+            Gson gson = new GsonBuilder().setPrettyPrinting().create();
+            System.out.println(gson.toJson(problems));
+        } catch (Exception e) {
+            System.err.println("{\"error\": \"" + e.getMessage().replace("\"", "'") + "\"}");
         }
     }
 

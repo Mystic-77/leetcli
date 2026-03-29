@@ -58,7 +58,10 @@ public final class InputHandler {
             return KeyEvent.of(Action.NONE);
         }
 
-        if (c == 19) return KeyEvent.of(Action.SAVE);
+        if (c == 19) return KeyEvent.of(Action.SAVE);       // Ctrl+S
+        if (c == 18) return KeyEvent.of(Action.RUN);        // Ctrl+R
+        if (c == 5)  return KeyEvent.of(Action.SUBMIT);     // Ctrl+E
+        if (c == 12) return KeyEvent.of(Action.SWITCH_LANG);// Ctrl+L
         if (c == '\r' || c == '\n') return KeyEvent.of(Action.ENTER);
         if (c == 127 || c == 8) return KeyEvent.of(Action.BACKSPACE);
         if (c == '\t') return KeyEvent.of(Action.TAB);

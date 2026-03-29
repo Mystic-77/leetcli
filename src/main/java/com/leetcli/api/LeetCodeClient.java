@@ -21,16 +21,24 @@ import java.util.concurrent.TimeUnit;
  */
 public class LeetCodeClient {
 
-    private static final String BASE_URL = "https://leetcode.com";
-    private static final String GRAPHQL_URL = BASE_URL + "/graphql/";
+    private static final String DEFAULT_baseUrl = "https://leetcode.com";
     private static final MediaType JSON_MEDIA = MediaType.get("application/json; charset=utf-8");
     private static final Gson GSON = new Gson();
 
     private final OkHttpClient httpClient;
     private final ConfigManager configManager;
+    private final String baseUrl;
+    private final String graphqlUrl;
 
     public LeetCodeClient(ConfigManager configManager) {
+        this(configManager, DEFAULT_baseUrl);
+    }
+
+    /** Test constructor — inject a mock server URL. */
+    public LeetCodeClient(ConfigManager configManager, String baseUrl) {
         this.configManager = configManager;
+        this.baseUrl = baseUrl;
+        this.graphqlUrl = baseUrl + "/graphql/";
         this.httpClient = new OkHttpClient.Builder()
                 .connectTimeout(15, TimeUnit.SECONDS)
                 .readTimeout(30, TimeUnit.SECONDS)
@@ -174,7 +182,7 @@ public class LeetCodeClient {
      */
     public String runCode(String titleSlug, String questionId, String lang,
                           String typedCode, String testCases) throws IOException {
-        String url = BASE_URL + "/problems/" + titleSlug + "/interpret_solution/";
+        String url = baseUrl + "/problems/" + titleSlug + "/interpret_solution/";
 
         JsonObject body = new JsonObject();
         body.addProperty("lang", lang);
@@ -204,7 +212,7 @@ public class LeetCodeClient {
      */
     public String submitCode(String titleSlug, String questionId, String lang,
                              String typedCode) throws IOException {
-        String url = BASE_URL + "/problems/" + titleSlug + "/submit/";
+        String url = baseUrl + "/problems/" + titleSlug + "/submit/";
 
         JsonObject body = new JsonObject();
         body.addProperty("lang", lang);
@@ -232,7 +240,7 @@ public class LeetCodeClient {
      * Returns the full result object once complete.
      */
     public JsonObject checkResult(String submissionId) throws IOException {
-        String url = BASE_URL + "/submissions/detail/" + submissionId + "/check/";
+        String url = baseUrl + "/submissions/detail/" + submissionId + "/check/";
 
         Request request = buildAuthenticatedRequest(url)
                 .get()
@@ -289,7 +297,7 @@ public class LeetCodeClient {
             body.add("variables", GSON.toJsonTree(variables));
         }
 
-        Request request = buildAuthenticatedRequest(GRAPHQL_URL)
+        Request request = buildAuthenticatedRequest(graphqlUrl)
                 .post(RequestBody.create(GSON.toJson(body), JSON_MEDIA))
                 .build();
 
@@ -313,8 +321,8 @@ public class LeetCodeClient {
         Request.Builder builder = new Request.Builder()
                 .url(url)
                 .header("Content-Type", "application/json")
-                .header("Referer", BASE_URL + "/")
-                .header("Origin", BASE_URL)
+                .header("Referer", baseUrl + "/")
+                .header("Origin", baseUrl)
                 .header("User-Agent", "LeetCLI/1.0");
 
         if (session != null && csrfToken != null) {

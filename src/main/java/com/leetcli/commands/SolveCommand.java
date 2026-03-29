@@ -16,6 +16,7 @@ import java.util.List;
  */
 @Command(
     name = "solve",
+    mixinStandardHelpOptions = true,
     description = "Open the TUI to solve a LeetCode problem (by ID or slug)"
 )
 public class SolveCommand implements Runnable {

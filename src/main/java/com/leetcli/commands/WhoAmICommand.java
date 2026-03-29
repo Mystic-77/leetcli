@@ -11,6 +11,7 @@ import picocli.CommandLine.Command;
  */
 @Command(
     name = "whoami",
+    mixinStandardHelpOptions = true,
     description = "Display current authenticated user and stats"
 )
 public class WhoAmICommand implements Runnable {
