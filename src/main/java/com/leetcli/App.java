@@ -4,11 +4,12 @@ import com.leetcli.commands.ListCommand;
 import com.leetcli.commands.LoginCommand;
 import com.leetcli.commands.SolveCommand;
 import com.leetcli.commands.WhoAmICommand;
+import com.leetcli.config.ConfigManager;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
 
 @Command(
-    name = "leetcode",
+    name = "leetcli",
     mixinStandardHelpOptions = true,
     version = "LeetCLI 1.0-SNAPSHOT",
     description = "Terminal-based LeetCode client",
@@ -23,20 +24,14 @@ public class App implements Runnable {
 
     @Override
     public void run() {
-        System.out.println();
-        System.out.println("  ╔══════════════════════════════════════╗");
-        System.out.println("  ║          LeetCLI v1.0                ║");
-        System.out.println("  ║   Terminal-based LeetCode Client     ║");
-        System.out.println("  ╚══════════════════════════════════════╝");
-        System.out.println();
-        System.out.println("  Commands:");
-        System.out.println("    login    Authenticate with LeetCode");
-        System.out.println("    whoami   Show your profile and stats");
-        System.out.println("    list     Browse and filter problems");
-        System.out.println("    solve    Open TUI to solve a problem");
-        System.out.println();
-        System.out.println("  Use --help for more details.");
-        System.out.println();
+        // No args → go straight into the problem browser.
+        // If not logged in yet, redirect to login first.
+        ConfigManager config = new ConfigManager();
+        if (config.get("leetcode_session") == null || config.get("leetcode_session").isBlank()) {
+            System.out.println("\n  Not logged in. Run: leetcli login\n");
+            return;
+        }
+        new CommandLine(new ListCommand()).execute();
     }
 
     public static void main(String[] args) {
