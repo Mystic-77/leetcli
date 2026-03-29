@@ -81,30 +81,30 @@ leetcli.bat [command]
 
 ### Docker (zero-install)
 
-No Java required — just Docker.
+No Java required — just Docker. A `docker-compose.yml` is included that handles session persistence and solution file syncing automatically.
 
 ```bash
-# 1. Build the image (one time)
-docker build -t leetcli .
+# Login
+docker compose run leetcli login
 
-# 2. Login (interactive — will prompt for session cookie)
-docker run -it -v leetcli-data:/root/.leetcli leetcli login
+# List problems
+docker compose run leetcli list
 
-# 3. List problems
-docker run -it -v leetcli-data:/root/.leetcli leetcli list
-
-# 4. Solve a problem (TUI)
-docker run -it -v leetcli-data:/root/.leetcli -v "$(pwd)/solutions:/app/solutions" leetcli solve two-sum
+# Solve a problem (TUI)
+docker compose run leetcli solve two-sum
 ```
 
-**Flags explained:**
-| Flag | Purpose |
-|------|---------|
-| `-it` | Allocates a TTY for JLine's terminal handling |
-| `-v leetcli-data:/root/.leetcli` | Persists login session across runs |
-| `-v "$(pwd)/solutions:/app/solutions"` | Syncs saved solutions to your local `solutions/` folder |
+Your login session and saved solutions persist between runs — `docker-compose.yml` mounts a named volume for `~/.leetcli` and maps your local `solutions/` folder into the container.
 
-> On Windows (PowerShell), replace `$(pwd)` with `${PWD}`.
+<details>
+<summary>Manual docker run (without compose)</summary>
+
+```bash
+docker build -t leetcli .
+docker run -it -v leetcli-data:/root/.leetcli -v "$(pwd)/solutions:/app/solutions" leetcli solve two-sum
+```
+> On Windows PowerShell, replace `$(pwd)` with `${PWD}`.
+</details>
 
 ### CLI Commands
 

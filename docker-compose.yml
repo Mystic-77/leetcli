@@ -1,0 +1,11 @@
+services:
+  leetcli:
+    build: .
+    stdin_open: true    # -i
+    tty: true           # -t
+    volumes:
+      - leetcli-data:/root/.leetcli       # persist login session
+      - ./solutions:/app/solutions        # persist saved solutions
+
+volumes:
+  leetcli-data:
