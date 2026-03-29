@@ -8,7 +8,7 @@ import picocli.CommandLine;
 import picocli.CommandLine.Command;
 
 @Command(
-    name = "leetcli",
+    name = "leetcode",
     mixinStandardHelpOptions = true,
     version = "LeetCLI 1.0-SNAPSHOT",
     description = "Terminal-based LeetCode client",
