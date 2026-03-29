@@ -1,0 +1,29 @@
+# This is Enterprise Bitch.
+name: CI
+
+on:
+  push:
+    branches: [main, security/audit-findings]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: temurin
+          cache: maven
+
+      - name: Build
+        run: mvn package -q
+
+      - name: Test
+        run: mvn test
+
+      - name: E2E smoke (no credentials)
+        run: bash scripts/e2e_test.sh target/leetcli-1.0-SNAPSHOT.jar
