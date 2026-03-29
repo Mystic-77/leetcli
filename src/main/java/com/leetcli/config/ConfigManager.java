@@ -8,6 +8,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Manages persistent configuration stored at ~/.leetcli/config.json
@@ -20,7 +21,7 @@ public class ConfigManager {
 
     private final Path configDir;
     private final Path configFile;
-    private Map<String, String> config;
+    private final Map<String, String> config = new ConcurrentHashMap<>();
 
     public ConfigManager() {
         this(DEFAULT_CONFIG_DIR);
@@ -30,7 +31,7 @@ public class ConfigManager {
     public ConfigManager(Path configDir) {
         this.configDir = configDir;
         this.configFile = configDir.resolve("config.json");
-        this.config = load();
+        this.config.putAll(load());
     }
 
     public String get(String key) {
@@ -45,9 +46,9 @@ public class ConfigManager {
         return config.containsKey(key) && config.get(key) != null && !config.get(key).isBlank();
     }
 
-    public void save() throws IOException {
+    public synchronized void save() throws IOException {
         Files.createDirectories(configDir);
-        Files.writeString(configFile, GSON.toJson(config));
+        Files.writeString(configFile, GSON.toJson(new HashMap<>(config)));
     }
 
     @SuppressWarnings("unchecked")
@@ -56,7 +57,7 @@ public class ConfigManager {
             if (Files.exists(configFile)) {
                 String json = Files.readString(configFile);
                 Map<String, String> loaded = GSON.fromJson(json, Map.class);
-                return loaded != null ? new HashMap<>(loaded) : new HashMap<>();
+                return loaded != null ? loaded : new HashMap<>();
             }
         } catch (IOException e) {
             System.err.println("Warning: Could not read config file: " + e.getMessage());

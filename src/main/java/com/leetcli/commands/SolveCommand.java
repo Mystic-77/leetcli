@@ -38,6 +38,11 @@ public class SolveCommand implements Runnable {
             String titleSlug;
 
             if (problemRef.matches("\\d+")) {
+                int numId = Integer.parseInt(problemRef);
+                if (numId < 1 || numId > 10000) {
+                    System.err.println("  ✗ Problem ID must be between 1 and 10000.\n");
+                    return;
+                }
                 // User passed a numeric ID — search for the problem
                 System.out.println("\n  ⏳ Looking up problem #" + problemRef + "...\n");
 

@@ -25,23 +25,23 @@ public class ListCommand implements Runnable {
 
     @Option(names = {"-l", "--limit"}, description = "Table mode: rows to show (default: 20)",
             defaultValue = "20")
-    private int limit;
+    int limit;
 
     @Option(names = {"-p", "--page"}, description = "Table mode: page number (default: 1)",
             defaultValue = "1")
-    private int page;
+    int page;
 
     @Option(names = {"-d", "--difficulty"}, description = "Filter: EASY, MEDIUM, HARD")
-    private String difficulty;
+    String difficulty;
 
     @Option(names = {"-s", "--search"}, description = "Search by keyword")
-    private String search;
+    String search;
 
     @Option(names = {"--no-tui"}, description = "Force table output even without other flags")
-    private boolean noTui;
+    boolean noTui;
 
     @Option(names = {"--json"}, description = "Output as JSON array (agent-friendly)")
-    private boolean json;
+    boolean json;
 
     @Override
     public void run() {

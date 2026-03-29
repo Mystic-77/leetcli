@@ -6,3 +6,5 @@ solutions/
 .DS_Store
 *.class
 *.jar
+.claude-flow/
+.swarm/

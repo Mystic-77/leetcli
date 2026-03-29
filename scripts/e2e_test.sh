@@ -6,6 +6,7 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 set -euo pipefail
+trap 'exit' INT TERM
 
 JAR="${1:-target/leetcli-1.0-SNAPSHOT.jar}"
 PASS=0; FAIL=0; SKIP=0
