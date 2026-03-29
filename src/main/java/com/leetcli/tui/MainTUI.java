@@ -323,7 +323,7 @@ public class MainTUI {
     private void handleLoadFile() {
         String slug = problem.getTitleSlug().replace("-", "_");
         String ext = SyntaxHighlighter.getFileExtension(currentLang);
-        Path file = Path.of(System.getProperty("user.dir"), "solutions", slug + ext);
+        Path file = solutionsDir().resolve(slug + ext);
         if (Files.exists(file)) {
             try {
                 codeEditor.reset(Files.readString(file));
@@ -340,7 +340,7 @@ public class MainTUI {
     private void handleSaveFile() {
         String slug = problem.getTitleSlug().replace("-", "_");
         String ext = SyntaxHighlighter.getFileExtension(currentLang);
-        Path dir = Path.of(System.getProperty("user.dir"), "solutions");
+        Path dir = solutionsDir();
         Path file = dir.resolve(slug + ext);
         try {
             Files.createDirectories(dir);
@@ -353,7 +353,7 @@ public class MainTUI {
     private String tryLoadSavedFile() {
         String slug = problem.getTitleSlug().replace("-", "_");
         String ext = SyntaxHighlighter.getFileExtension(currentLang);
-        Path file = Path.of(System.getProperty("user.dir"), "solutions", slug + ext);
+        Path file = solutionsDir().resolve(slug + ext);
         if (Files.exists(file)) {
             try {
                 statusMsg = Messages.get("status.loaded", file.getFileName());
@@ -368,10 +368,15 @@ public class MainTUI {
         try {
             String slug = problem.getTitleSlug().replace("-", "_");
             String ext = SyntaxHighlighter.getFileExtension(currentLang);
-            Path dir = Path.of(System.getProperty("user.dir"), "solutions");
+            Path dir = solutionsDir();
             Files.createDirectories(dir);
             Files.writeString(dir.resolve(slug + ext), codeEditor.getText());
         } catch (IOException ignored) {}
+    }
+
+    /** Consistent solutions directory: ~/.leetcli/solutions/ — same on all platforms. */
+    private static Path solutionsDir() {
+        return Path.of(System.getProperty("user.home"), ".leetcli", "solutions");
     }
 
     /** Schedule an auto-save 2 seconds after the last edit (debounced). */

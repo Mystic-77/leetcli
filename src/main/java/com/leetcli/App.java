@@ -11,7 +11,7 @@ import picocli.CommandLine.Command;
 @Command(
     name = "leetcli",
     mixinStandardHelpOptions = true,
-    version = "LeetCLI 1.0-SNAPSHOT",
+    version = "LeetCLI 1.0",
     description = "Terminal-based LeetCode client",
     subcommands = {
         LoginCommand.class,
@@ -24,14 +24,32 @@ public class App implements Runnable {
 
     @Override
     public void run() {
-        // No args → go straight into the problem browser.
-        // If not logged in yet, redirect to login first.
         ConfigManager config = new ConfigManager();
-        if (config.get("leetcode_session") == null || config.get("leetcode_session").isBlank()) {
-            System.out.println("\n  Not logged in. Run: leetcli login\n");
-            return;
+        boolean loggedIn = config.has("leetcode_session") && config.has("csrf_token");
+
+        if (!loggedIn) {
+            printWelcome();
+            // Run login wizard inline — hands control to LoginCommand
+            new CommandLine(new LoginCommand()).execute();
+
+            // Re-check — if login succeeded, drop into browser
+            config = new ConfigManager();
+            if (!config.has("leetcode_session")) return;  // login failed/cancelled
         }
+
         new CommandLine(new ListCommand()).execute();
+    }
+
+    private static void printWelcome() {
+        System.out.println();
+        System.out.println("  ┌─────────────────────────────────────────────┐");
+        System.out.println("  │            Welcome to leetcli               │");
+        System.out.println("  │      Terminal-based LeetCode client         │");
+        System.out.println("  └─────────────────────────────────────────────┘");
+        System.out.println();
+        System.out.println("  Looks like your first time here.");
+        System.out.println("  Let's connect your LeetCode account.");
+        System.out.println();
     }
 
     public static void main(String[] args) {
