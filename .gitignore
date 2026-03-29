@@ -1,5 +1,8 @@
 target/
 build_output.txt
+solutions/
 .idea/
 *.iml
 .DS_Store
+*.class
+*.jar

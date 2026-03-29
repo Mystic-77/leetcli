@@ -8,7 +8,6 @@ import com.leetcli.config.ConfigManager;
 import com.leetcli.util.HtmlToText;
 import org.jline.terminal.Terminal;
 import org.jline.terminal.TerminalBuilder;
-import org.jline.utils.NonBlockingReader;
 
 import java.io.IOException;
 import java.io.PrintWriter;
@@ -18,8 +17,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Multi-panel TUI using JLine3 + ANSI escape codes.
- * Renders directly inside the terminal like tmux/btop.
+ * Multi-panel TUI orchestrator.
+ * Delegates rendering, input, and editing to dedicated classes.
  */
 public class MainTUI {
 
@@ -29,72 +28,27 @@ public class MainTUI {
 
     private Terminal terminal;
     private PrintWriter writer;
-    private int W, H; // terminal width/height
+    private int W, H, prevW, prevH;
 
     // Panel content
     private List<String> problemLines;
-    private List<String> editorLines;
-    private List<String> testCaseLines;
+    private EditorState codeEditor;
+    private EditorState testEditor;
     private List<String> resultLines;
 
-    // Scroll offsets (Y axis)
-    private int[] scroll = {0, 0, 0, 0};
-
-    // Editor offsets (X axis)
-    private int scrollX = 0;
+    // Scroll offsets for read-only panels
+    private int scrollProblem = 0;
+    private int scrollResults = 0;
 
     // Active panel: 0=problem, 1=editor, 2=tests, 3=results
     private int active = 1;
 
-    // Editor cursor
-    private int curLine = 0, curCol = 0;
-    
-    // Editor text selection
-    private int anchorLine = -1, anchorCol = -1;
+    // Multi-language support
+    private String currentLang = "java";
+    private List<String> availableLangs;
 
     private String statusMsg = "";
     private volatile boolean running = true;
-
-    // ANSI helpers
-    private static final String ESC = "\u001b[";
-    // Everforest Dark (Hard) TrueColors
-    private static final String BG_RGB = "48;2;45;53;59m";
-    private static final String FG_RGB = "38;2;211;198;170m";
-    
-    // Globals reset everything back to Everforest
-    private static final String RESET = ESC + "0m" + ESC + BG_RGB + ESC + FG_RGB;
-    private static final String HIDE_CURSOR = ESC + "?25l";
-    private static final String SHOW_CURSOR = ESC + "?25h";
-    private static final String ALT_BUF_ON = ESC + "?1049h";
-    private static final String ALT_BUF_OFF = ESC + "?1049l";
-    private static final String CLEAR = ESC + BG_RGB + ESC + "2J";
-
-    // Everforest Palette
-    private static final String DIM = ESC + "38;2;133;146;137m";
-    private static final String CYAN = ESC + "38;2;131;192;146m";
-    private static final String BLUE = ESC + "38;2;127;187;179m";
-    private static final String GREEN = ESC + "38;2;166;180;101m";
-    private static final String YELLOW = ESC + "38;2;219;188;127m";
-    private static final String MAGENTA = ESC + "38;2;214;153;182m";
-    private static final String RED = ESC + "38;2;230;126;128m";
-    private static final String GREY = ESC + "38;2;122;132;120m";
-
-    // Reverse Video / Specific elements
-    private static final String TITLE_BG = ESC + "48;2;127;187;179m" + ESC + "38;2;45;53;59m"; // Blue Bg, Dark text
-    private static final String STATUS_BG = ESC + "48;2;166;180;101m" + ESC + "38;2;45;53;59m"; // Green Bg, Dark text
-    
-    // Badge Backgrounds
-    private static final String BADGE_GREEN = ESC + "48;2;166;180;101m" + ESC + "38;2;45;53;59m"; // Green bg, dark fg
-    private static final String BADGE_YELLOW = ESC + "48;2;219;188;127m" + ESC + "38;2;45;53;59m"; // Yellow bg, dark fg
-    private static final String BADGE_RED = ESC + "48;2;230;126;128m" + ESC + "38;2;45;53;59m"; // Red bg, dark fg
-
-    private static final String[] KEYWORDS = {
-        "public", "private", "protected", "class", "interface", "enum",
-        "void", "int", "boolean", "double", "float", "char", "long",
-        "if", "else", "for", "while", "do", "switch", "case", "return",
-        "new", "this", "super", "try", "catch", "finally", "throw", "throws",
-        "static", "final", "abstract", "import", "package", "String", "List"
-    };
 
     public MainTUI(LeetCodeClient client, ProblemDetail problem, ConfigManager config) {
         this.client = client;
@@ -103,15 +57,11 @@ public class MainTUI {
     }
 
     public void run() throws IOException {
-        terminal = TerminalBuilder.builder()
-                .system(true)
-                .jansi(true)
-                .build();
+        terminal = TerminalBuilder.builder().system(true).jansi(true).build();
         terminal.enterRawMode();
         writer = terminal.writer();
 
-        // Switch to alternate screen buffer
-        writer.print(ALT_BUF_ON + HIDE_CURSOR + CLEAR);
+        writer.print(Theme.ALT_BUF_ON + Theme.HIDE_CURSOR + Theme.CLEAR);
         writer.flush();
 
         try {
@@ -120,589 +70,326 @@ public class MainTUI {
             while (running) {
                 W = terminal.getWidth();
                 H = terminal.getHeight();
+
+                // ── Resize detection: clear and repaint ──
+                if (W != prevW || H != prevH) {
+                    writer.print(Theme.CLEAR);
+                    writer.flush();
+                    prevW = W;
+                    prevH = H;
+                }
+
                 if (W < 40 || H < 10) {
-                    writer.print(ESC + "1;1H" + CLEAR);
-                    writer.print("Terminal too small. Resize to at least 40x10.");
+                    writer.print(Theme.ESC + "1;1H" + Theme.CLEAR);
+                    writer.print(Messages.get("status.termTooSmall"));
                     writer.flush();
                     handleInput();
                     continue;
                 }
+
                 render();
                 handleInput();
             }
         } finally {
-            writer.print(SHOW_CURSOR + RESET + ALT_BUF_OFF);
+            writer.print(Theme.SHOW_CURSOR + Theme.RESET + Theme.ALT_BUF_OFF);
             writer.flush();
             terminal.close();
         }
     }
 
+    // ═══════════════════════════════════════════════
+    //  INIT
+    // ═══════════════════════════════════════════════
+
     private void initPanels() {
+        // Problem description (read-only, wrapped at render time)
         String desc = HtmlToText.convert(problem.getContent());
         problemLines = new ArrayList<>(List.of(desc.replace("\t", "    ").split("\n")));
 
-        String code = getCodeStub();
-        editorLines = new ArrayList<>(List.of(code.replace("\t", "    ").split("\n", -1)));
+        // Code editor
+        codeEditor = new EditorState(getCodeStub());
 
-        String tc = problem.getSampleTestCase() != null ? problem.getSampleTestCase() : "";
-        testCaseLines = new ArrayList<>(List.of(tc.replace("\t", "    ").split("\n", -1)));
+        // Test cases — load ALL examples, not just the first
+        String allTests = buildAllTestCases();
+        testEditor = new EditorState(allTests);
 
+        // Available languages from the problem's code snippets
+        availableLangs = new ArrayList<>();
+        if (problem.getCodeSnippets() != null) {
+            for (var s : problem.getCodeSnippets()) {
+                availableLangs.add(s.getLangSlug());
+            }
+        }
+        if (availableLangs.isEmpty()) availableLangs.add("java");
+        if (!availableLangs.contains(currentLang)) currentLang = availableLangs.get(0);
+
+        // Results / shortcuts
         resultLines = new ArrayList<>(List.of(
-                "Shortcuts:",
-                "",
-                " F5        Run code",
-                " F6        Submit solution",
-                " F7        Load from file",
-                " Ctrl+S    Save to file",
-                " Ctrl+Arr  Switch panel",
-                " Shift+Arr Select text in Editor",
-                " Esc       Quit",
-                "",
-                "Tab = indent in editor."
+            Messages.get("shortcuts.title"), "",
+            Messages.get("shortcuts.run"),
+            Messages.get("shortcuts.submit"),
+            Messages.get("shortcuts.load"),
+            Messages.get("shortcuts.save"),
+            Messages.get("shortcuts.switch"),
+            Messages.get("shortcuts.select"),
+            Messages.get("shortcuts.lang"),
+            Messages.get("shortcuts.quit"), "",
+            Messages.get("shortcuts.tab")
         ));
 
         switchPanel(1);
     }
 
-    // ═══════════════════════════════════════════════════════
+    /** Join all example test cases with a blank separator line. */
+    private String buildAllTestCases() {
+        List<String> examples = problem.getExampleTestcaseList();
+        if (examples != null && !examples.isEmpty()) {
+            return String.join("\n", examples);
+        }
+        String single = problem.getSampleTestCase();
+        return single != null ? single : "";
+    }
+
+    // ═══════════════════════════════════════════════
     //  RENDERING
-    // ═══════════════════════════════════════════════════════
+    // ═══════════════════════════════════════════════
 
     private void render() {
-        int leftW = W / 2;
-        int rightW = W - leftW;
-        int topH = Math.max(3, (int) (H * 0.62));
-        int botH = Math.max(3, H - topH - 2); 
-
-        StringBuilder buf = new StringBuilder(W * H * 2);
-        buf.append(ESC).append("1;1H");
-
-        // ── Row 1: Title bar ──
-        String diffBadge = switch (problem.getDifficulty()) {
-            case "Easy" -> BADGE_GREEN + " Easy " + TITLE_BG;
-            case "Medium" -> BADGE_YELLOW + " Medium " + TITLE_BG;
-            case "Hard" -> BADGE_RED + " Hard " + TITLE_BG;
-            default -> " " + problem.getDifficulty() + " ";
-        };
-        String title = String.format(" LeetCLI │ #%s %s │%s",
-                problem.getQuestionFrontendId(), truncate(problem.getTitle(), 30),
-                diffBadge);
-        buf.append(TITLE_BG).append(pad(title, W)).append(RESET);
-
-        // ── Top half: Problem (left) | Editor (right) ──
-        String[] lLabel = makeBorder("Problem", CYAN, active == 0, leftW);
-        String[] rLabel = makeBorder("Editor [Java]", GREEN, active == 1, rightW);
-        buf.append(lLabel[0]).append(rLabel[0]);
-
-        for (int r = 0; r < topH - 2; r++) {
-            String lc = active == 0 ? CYAN : DIM;
-            String rc = active == 1 ? GREEN : DIM;
-            
-            buf.append(lc).append("│").append(RESET)
-               .append(renderBasicLine(problemLines, scroll[0] + r, leftW - 2))
-               .append(lc).append("│").append(RESET);
-               
-            buf.append(rc).append("│").append(RESET)
-               .append(renderEditorLine(scroll[1] + r, rightW - 2))
-               .append(rc).append("│").append(RESET);
-        }
-
-        buf.append(active == 0 ? CYAN : DIM).append("└").append("─".repeat(leftW - 2)).append("┘").append(RESET);
-        buf.append(active == 1 ? GREEN : DIM).append("└").append("─".repeat(rightW - 2)).append("┘").append(RESET);
-
-        // ── Bottom half: Tests (left) | Results (right) ──
-        String[] blLabel = makeBorder("Test Cases", YELLOW, active == 2, leftW);
-        String[] brLabel = makeBorder("Results", MAGENTA, active == 3, rightW);
-        buf.append(blLabel[0]).append(brLabel[0]);
-
-        for (int r = 0; r < botH - 2; r++) {
-            String lc = active == 2 ? YELLOW : DIM;
-            String rc = active == 3 ? MAGENTA : DIM;
-            
-            buf.append(lc).append("│").append(RESET)
-               .append(renderBasicLine(testCaseLines, scroll[2] + r, leftW - 2))
-               .append(lc).append("│").append(RESET);
-               
-            buf.append(rc).append("│").append(RESET)
-               .append(renderBasicLine(resultLines, scroll[3] + r, rightW - 2))
-               .append(rc).append("│").append(RESET);
-        }
-
-        buf.append(active == 2 ? YELLOW : DIM).append("└").append("─".repeat(leftW - 2)).append("┘").append(RESET);
-        buf.append(active == 3 ? MAGENTA : DIM).append("└").append("─".repeat(rightW - 2)).append("┘").append(RESET);
-
-        // ── Status bar ──
-        buf.append(STATUS_BG).append(pad(" " + statusMsg, W)).append(RESET);
-
-        writer.print(buf);
+        String frame = Renderer.renderFrame(
+            W, H, problem, problemLines,
+            codeEditor, testEditor, resultLines,
+            scrollProblem, scrollResults,
+            active, currentLang, statusMsg
+        );
+        writer.print(frame);
         writer.flush();
     }
 
-    private String[] makeBorder(String label, String color, boolean act, int w) {
-        String marker = act ? "● " : "";
-        String text = "─ " + marker + label + " ";
-        int dashLen = Math.max(0, w - 2 - text.length());
-        return new String[]{ (act ? color : DIM) + "┌" + text + "─".repeat(dashLen) + "┐" + RESET };
-    }
-
-    private String getLine(List<String> lines, int idx) {
-        if (idx >= 0 && idx < lines.size()) return lines.get(idx);
-        return "";
-    }
-
-    private String renderBasicLine(List<String> lines, int y, int w) {
-        return pad(getLine(lines, y), w);
-    }
-
-    private String renderEditorLine(int y, int viewW) {
-        if (y < 0 || y >= editorLines.size()) return " ".repeat(viewW);
-        String raw = editorLines.get(y);
-        
-        // 1. Tokenize for Syntax Highlighting
-        int[] fg = new int[raw.length()]; // 0=def, 1=cyan, 2=yellow(str), 3=gray(comment), 4=red(num)
-        boolean inStr = false, inComment = false;
-        
-        for (int i = 0; i < raw.length(); i++) {
-            if (inComment) { fg[i] = 3; continue; }
-            if (raw.startsWith("//", i)) { inComment = true; fg[i] = 3; if (i+1 < raw.length()) fg[i+1] = 3; i++; continue; }
-            if (raw.charAt(i) == '"') {
-                if (inStr) { fg[i] = 2; inStr = false; continue; }
-                else { inStr = true; fg[i] = 2; continue; }
-            }
-            if (inStr) { fg[i] = 2; continue; }
-            if (Character.isDigit(raw.charAt(i))) { fg[i] = 4; }
-        }
-        
-        for (String kw : KEYWORDS) {
-            int idx = -1;
-            while ((idx = raw.indexOf(kw, idx + 1)) != -1) {
-                boolean startOk = idx == 0 || !Character.isLetterOrDigit(raw.charAt(idx - 1));
-                boolean endOk = idx + kw.length() == raw.length() || !Character.isLetterOrDigit(raw.charAt(idx + kw.length()));
-                if (startOk && endOk) {
-                    for (int i = 0; i < kw.length(); i++) if (fg[idx+i] == 0) fg[idx+i] = 1;
-                }
-            }
-        }
-
-        // 2. Generate exactly viewW characters
-        StringBuilder sb = new StringBuilder();
-        int curFg = 0;
-        boolean curInv = false;
-        
-        for (int i = scrollX; i < scrollX + viewW; i++) {
-            if (i >= raw.length()) {
-                if (curInv) { sb.append("\u001b[27m"); curInv = false; }
-                sb.append(" ");
-                continue;
-            }
-            
-            boolean sel = isSelected(y, i);
-            if (sel != curInv) {
-                curInv = sel;
-                sb.append(curInv ? "\u001b[7m" : "\u001b[27m");
-            }
-            
-            int color = fg[i];
-            if (color != curFg) {
-                curFg = color;
-                switch(color) {
-                    case 0 -> sb.append(ESC).append(FG_RGB);
-                    case 1 -> sb.append(BLUE); // keywords
-                    case 2 -> sb.append(YELLOW); // strings
-                    case 3 -> sb.append(GREY); // comments
-                    case 4 -> sb.append(RED); // numbers
-                }
-            }
-            
-            // Draw Cursor (if active)
-            boolean isCur = (active == 1 && y == curLine && i == curCol);
-            if (isCur && !curInv) sb.append("\u001b[7m");
-            sb.append(raw.charAt(i));
-            if (isCur && !curInv) sb.append("\u001b[27m");
-        }
-        sb.append("\u001b[0m"); // Safety reset
-        return sb.toString();
-    }
-
-    private boolean isSelected(int y, int x) {
-        if (anchorLine == -1) return false;
-        int sy = curLine, sx = curCol;
-        int ey = anchorLine, ex = anchorCol;
-        if (sy > ey || (sy == ey && sx > ex)) {
-            sy = anchorLine; sx = anchorCol;
-            ey = curLine; ex = curCol;
-        }
-        if (y < sy || y > ey) return false;
-        if (sy == ey) return x >= sx && x < ex;
-        if (y == sy) return x >= sx;
-        if (y == ey) return x < ex;
-        return true;
-    }
-
-    private String pad(String s, int w) {
-        if (w <= 0) return "";
-        String visible = s.replaceAll("\u001b\\[[0-9;]*m", "");
-        if (visible.length() >= w) return truncateVisible(s, w);
-        return s + " ".repeat(w - visible.length());
-    }
-
-    private String truncateVisible(String s, int max) {
-        StringBuilder out = new StringBuilder();
-        int vis = 0; boolean inEsc = false;
-        for (char c : s.toCharArray()) {
-            if (c == '\u001b') inEsc = true;
-            if (!inEsc) { if (vis >= max) break; vis++; }
-            out.append(c);
-            if (inEsc && Character.isLetter(c)) inEsc = false;
-        }
-        return out.toString();
-    }
-    private String truncate(String s, int mx) { return s.length() <= mx ? s : s.substring(0, mx - 3) + "..."; }
-
-    // ═══════════════════════════════════════════════════════
+    // ═══════════════════════════════════════════════
     //  INPUT HANDLING
-    // ═══════════════════════════════════════════════════════
+    // ═══════════════════════════════════════════════
 
     private void handleInput() throws IOException {
-        NonBlockingReader reader = terminal.reader();
-        int c = reader.read(); // Blocks until a key is pressed!
-        if (c == -1 || c == -2) return;
+        InputHandler.KeyEvent ev = InputHandler.read(terminal.reader());
 
-        if (c == 27) { 
-            int c2 = reader.read(200);
-            if (c2 == -1 || c2 == -2) { running = false; return; }
-            if (c2 == 'O') {
-                int c3 = reader.read(); // BLOCKING READ ensures trailing character 'A' is absorbed!
-                if (c3 > 0) processEscape(c2, String.valueOf((char) c3));
-            } else if (c2 == '[') {
-                StringBuilder seq = new StringBuilder();
-                while (true) {
-                    int b = reader.read(); // BLOCKING READ removes staggered letter leakage!
-                    if (b <= 0) break;
-                    seq.append((char) b);
-                    if (b >= 0x40 && b <= 0x7E) break; // Terminal byte reaches end of CSI
-                }
-                processEscape(c2, seq.toString());
-            }
-        } else if (c == 19) { // Ctrl+S
-            handleSaveFile();
-        } else if (active == 1 || active == 2) {
-            handleTyping(c);
+        switch (ev.action()) {
+            case QUIT -> running = false;
+            case SAVE -> handleSaveFile();
+
+            // ── Panel switching (Ctrl+Arrow) ──
+            case CTRL_UP    -> switchPanel(active >= 2 ? active - 2 : active);
+            case CTRL_DOWN  -> switchPanel(active <= 1 ? active + 2 : active);
+            case CTRL_RIGHT -> switchPanel(active % 2 == 0 ? active + 1 : active);
+            case CTRL_LEFT  -> switchPanel(active % 2 == 1 ? active - 1 : active);
+
+            // ── Editor actions (panels 1 & 2) ──
+            case ARROW_UP    -> handleEditorOrScroll(() -> getActiveEditor().moveUp(false), -1);
+            case ARROW_DOWN  -> handleEditorOrScroll(() -> getActiveEditor().moveDown(false), 1);
+            case ARROW_LEFT  -> { if (isEditorActive()) getActiveEditor().moveLeft(false); }
+            case ARROW_RIGHT -> { if (isEditorActive()) getActiveEditor().moveRight(false); }
+            case SHIFT_UP    -> { if (isEditorActive()) getActiveEditor().moveUp(true); }
+            case SHIFT_DOWN  -> { if (isEditorActive()) getActiveEditor().moveDown(true); }
+            case SHIFT_LEFT  -> { if (isEditorActive()) getActiveEditor().moveLeft(true); }
+            case SHIFT_RIGHT -> { if (isEditorActive()) getActiveEditor().moveRight(true); }
+            case HOME        -> { if (isEditorActive()) getActiveEditor().home(false); }
+            case END         -> { if (isEditorActive()) getActiveEditor().end(false); }
+            case SHIFT_HOME  -> { if (isEditorActive()) getActiveEditor().home(true); }
+            case SHIFT_END   -> { if (isEditorActive()) getActiveEditor().end(true); }
+            case DELETE      -> { if (isEditorActive()) getActiveEditor().delete(); }
+            case BACKSPACE   -> { if (isEditorActive()) getActiveEditor().backspace(); }
+            case TAB         -> { if (isEditorActive()) getActiveEditor().insertTab(); }
+            case ENTER       -> { if (isEditorActive()) getActiveEditor().enter(); }
+            case CHAR        -> { if (isEditorActive()) getActiveEditor().insertChar(ev.ch()); }
+
+            // ── Actions ──
+            case RUN         -> handleRunCode();
+            case SUBMIT      -> handleSubmitCode();
+            case LOAD_FILE   -> handleLoadFile();
+            case SWITCH_LANG -> handleSwitchLang();
+
+            default -> {}
+        }
+
+        // Keep cursor in view for editable panels
+        if (isEditorActive()) {
+            int viewW = (active == 1 ? W - W / 2 : W / 2) - 2;
+            int viewH = active == 1 ? Renderer.topViewH(H) : Renderer.botViewH(H);
+            getActiveEditor().ensureVisible(viewW, viewH);
         }
     }
 
-    private void processEscape(int type, String seq) {
-        if (type == 'O') {
-            switch (seq) {
-                case "A" -> handleArrowUp(false);
-                case "B" -> handleArrowDown(false);
-                case "C" -> handleArrowRight(false);
-                case "D" -> handleArrowLeft(false);
-                case "H" -> handleHome(false);
-                case "F" -> handleEnd(false);
-            }
-        } else if (type == '[') {
-            if (seq.equals("A")) handleArrowUp(false);
-            else if (seq.equals("B")) handleArrowDown(false);
-            else if (seq.equals("C")) handleArrowRight(false);
-            else if (seq.equals("D")) handleArrowLeft(false);
-            else if (seq.equals("H") || seq.equals("1~")) handleHome(false);
-            else if (seq.equals("F") || seq.equals("4~")) handleEnd(false);
-            else if (seq.equals("3~")) handleDelete();
-            else if (seq.endsWith("A") && seq.contains(";5")) switchPanel(active >= 2 ? active - 2 : active); // Ctrl+Up
-            else if (seq.endsWith("B") && seq.contains(";5")) switchPanel(active <= 1 ? active + 2 : active); // Ctrl+Down
-            else if (seq.endsWith("C") && seq.contains(";5")) switchPanel(active % 2 == 0 ? active + 1 : active); // Ctrl+Right
-            else if (seq.endsWith("D") && seq.contains(";5")) switchPanel(active % 2 == 1 ? active - 1 : active); // Ctrl+Left
-            else if (seq.endsWith("A") && seq.contains(";2")) handleArrowUp(true); // Shift+Up
-            else if (seq.endsWith("B") && seq.contains(";2")) handleArrowDown(true); // Shift+Down
-            else if (seq.endsWith("C") && seq.contains(";2")) handleArrowRight(true); // Shift+Right
-            else if (seq.endsWith("D") && seq.contains(";2")) handleArrowLeft(true); // Shift+Left
-            else if (seq.endsWith("H") && seq.contains(";2")) handleHome(true); // Shift+Home
-            else if (seq.endsWith("F") && seq.contains(";2")) handleEnd(true); // Shift+End
-            else if (seq.equals("15~")) handleRunCode(); // F5
-            else if (seq.equals("17~")) handleSubmitCode(); // F6
-            else if (seq.equals("18~")) handleLoadFile(); // F7
+    private boolean isEditorActive() { return active == 1 || active == 2; }
+
+    private EditorState getActiveEditor() {
+        return active == 2 ? testEditor : codeEditor;
+    }
+
+    /** For arrow up/down: move cursor in editors, scroll in read-only panels. */
+    private void handleEditorOrScroll(Runnable editorAction, int scrollDelta) {
+        if (isEditorActive()) {
+            editorAction.run();
+        } else if (active == 0) {
+            scrollProblem = Math.max(0, scrollProblem + scrollDelta);
+        } else {
+            scrollResults = Math.max(0, scrollResults + scrollDelta);
         }
     }
 
     private void switchPanel(int p) {
         active = p;
         String name = switch (active) {
-            case 0 -> "Problem (↑↓ scroll)";
-            case 1 -> "Editor (Type, Shift+Arr=select)";
-            case 2 -> "Test Cases (editable)";
-            case 3 -> "Results (↑↓ scroll)";
+            case 0 -> Messages.get("status.problem");
+            case 1 -> Messages.get("status.editor");
+            case 2 -> Messages.get("status.testcases");
+            case 3 -> Messages.get("status.results");
             default -> "";
         };
-        statusMsg = name + " │ Ctrl+Arrows: switch │ F5: run │ F6: submit │ Esc: quit";
+        statusMsg = name + " " + Messages.get("status.suffix");
     }
 
-    private void checkScrollX() {
-        if (active != 1) return;
-        int viewW = (W / 2) - 2;
-        if (curCol < scrollX) scrollX = curCol;
-        else if (curCol >= scrollX + viewW) scrollX = curCol - viewW + 1;
+    // ═══════════════════════════════════════════════
+    //  LANGUAGE SWITCHING
+    // ═══════════════════════════════════════════════
+
+    private void handleSwitchLang() {
+        if (availableLangs.size() <= 1) return;
+        int idx = availableLangs.indexOf(currentLang);
+        currentLang = availableLangs.get((idx + 1) % availableLangs.size());
+
+        // Reload code stub for the new language
+        codeEditor.reset(getCodeStub());
+        statusMsg = Messages.get("status.langSwitched", SyntaxHighlighter.getDisplayName(currentLang));
     }
-
-    private void checkScrollY() {
-        int viewH = Math.max(3, (int) (H * 0.62)) - 2;
-        if (curLine < scroll[1]) scroll[1] = curLine;
-        else if (curLine >= scroll[1] + viewH) scroll[1] = curLine - viewH + 1;
-    }
-
-    private void handleArrowUp(boolean shift) {
-        if (active == 1) {
-            if (shift && anchorLine == -1) { anchorLine = curLine; anchorCol = curCol; }
-            if (!shift) { anchorLine = -1; anchorCol = -1; }
-            if (curLine > 0) curLine--;
-            curCol = Math.min(curCol, editorLines.get(curLine).length());
-            checkScrollY(); checkScrollX();
-        } else {
-            if (scroll[active] > 0) scroll[active]--;
-        }
-    }
-
-    private void handleArrowDown(boolean shift) {
-        if (active == 1) {
-            if (shift && anchorLine == -1) { anchorLine = curLine; anchorCol = curCol; }
-            if (!shift) { anchorLine = -1; anchorCol = -1; }
-            if (curLine < editorLines.size() - 1) curLine++;
-            curCol = Math.min(curCol, editorLines.get(curLine).length());
-            checkScrollY(); checkScrollX();
-        } else {
-            if (scroll[active] < getActiveLines().size() - 1) scroll[active]++;
-        }
-    }
-
-    private void handleArrowRight(boolean shift) {
-        if (active == 1) {
-            if (shift && anchorLine == -1) { anchorLine = curLine; anchorCol = curCol; }
-            if (!shift) { anchorLine = -1; anchorCol = -1; }
-            String line = editorLines.get(curLine);
-            if (curCol < line.length()) curCol++;
-            else if (curLine < editorLines.size() - 1) { curLine++; curCol = 0; }
-            checkScrollY(); checkScrollX();
-        }
-    }
-
-    private void handleArrowLeft(boolean shift) {
-        if (active == 1) {
-            if (shift && anchorLine == -1) { anchorLine = curLine; anchorCol = curCol; }
-            if (!shift) { anchorLine = -1; anchorCol = -1; }
-            if (curCol > 0) curCol--;
-            else if (curLine > 0) { curLine--; curCol = editorLines.get(curLine).length(); }
-            checkScrollY(); checkScrollX();
-        }
-    }
-
-    private void handleHome(boolean shift) {
-        if (active != 1) return;
-        if (shift && anchorLine == -1) { anchorLine = curLine; anchorCol = curCol; }
-        if (!shift) { anchorLine = -1; anchorCol = -1; }
-        curCol = 0; checkScrollX();
-    }
-
-    private void handleEnd(boolean shift) {
-        if (active != 1) return;
-        if (shift && anchorLine == -1) { anchorLine = curLine; anchorCol = curCol; }
-        if (!shift) { anchorLine = -1; anchorCol = -1; }
-        curCol = editorLines.get(curLine).length(); checkScrollX();
-    }
-
-    private void deleteSelection() {
-        if (anchorLine == -1) return;
-        int sy = curLine, sx = curCol;
-        int ey = anchorLine, ex = anchorCol;
-        if (sy > ey || (sy == ey && sx > ex)) { sy = anchorLine; sx = anchorCol; ey = curLine; ex = curCol; }
-        
-        String before = editorLines.get(sy).substring(0, sx);
-        String after = editorLines.get(ey).substring(ex);
-        for (int i = ey; i > sy; i--) editorLines.remove(i);
-        editorLines.set(sy, before + after);
-        
-        curLine = sy; curCol = sx;
-        anchorLine = -1; anchorCol = -1;
-        checkScrollY(); checkScrollX();
-    }
-
-    private void handleDelete() {
-        if (active != 1) return;
-        if (anchorLine != -1) { deleteSelection(); return; }
-        String line = editorLines.get(curLine);
-        if (curCol < line.length()) {
-            editorLines.set(curLine, line.substring(0, curCol) + line.substring(curCol + 1));
-        } else if (curLine < editorLines.size() - 1) {
-            String next = editorLines.remove(curLine + 1);
-            editorLines.set(curLine, line + next);
-        }
-    }
-
-    private void handleTyping(int c) {
-        List<String> lines = (active == 1) ? editorLines : testCaseLines;
-        if (active == 1 && anchorLine != -1) deleteSelection(); // Auto-delete selected text on type
-        
-        int cl = (active == 1) ? curLine : Math.max(0, lines.size() - 1);
-
-        if (c == '\r' || c == '\n') {
-            if (cl < lines.size()) {
-                String cur = lines.get(cl);
-                int col = (active == 1) ? curCol : cur.length();
-                lines.set(cl, cur.substring(0, col));
-                lines.add(cl + 1, cur.substring(col));
-                if (active == 1) { curLine++; curCol = 0; }
-            } else {
-                lines.add("");
-                if (active == 1) { curLine = lines.size() - 1; curCol = 0; }
-            }
-        } else if (c == 127 || c == 8) { // Backspace
-            if (active == 1) {
-                if (curCol > 0 && cl < lines.size()) {
-                    String l = lines.get(cl);
-                    lines.set(cl, l.substring(0, curCol - 1) + l.substring(curCol));
-                    curCol--;
-                } else if (curCol == 0 && curLine > 0) {
-                    String cur = lines.remove(cl);
-                    curLine--;
-                    curCol = lines.get(curLine).length();
-                    lines.set(curLine, lines.get(curLine) + cur);
-                }
-            } else if (!lines.isEmpty()) {
-                int li = lines.size() - 1;
-                String last = lines.get(li);
-                if (!last.isEmpty()) lines.set(li, last.substring(0, last.length() - 1));
-                else if (lines.size() > 1) lines.remove(li);
-            }
-        } else if (c == '\t') {
-            if (cl < lines.size()) {
-                String l = lines.get(cl);
-                int col = (active == 1) ? curCol : l.length();
-                lines.set(cl, l.substring(0, col) + "    " + l.substring(col));
-                if (active == 1) curCol += 4;
-            }
-        } else if (c >= 32 && c < 127) {
-            if (cl < lines.size()) {
-                String l = lines.get(cl);
-                int col = (active == 1) ? curCol : l.length();
-                lines.set(cl, l.substring(0, col) + (char) c + l.substring(col));
-                if (active == 1) curCol++;
-            } else {
-                lines.add(String.valueOf((char) c));
-                if (active == 1) { curLine = lines.size() - 1; curCol = 1; }
-            }
-        }
-        checkScrollY(); checkScrollX();
-    }
-
-    private List<String> getActiveLines() {
-        return switch (active) { case 0 -> problemLines; case 1 -> editorLines; case 2 -> testCaseLines; default -> resultLines; };
-    }
-
-    // ═══════════════════════════════════════════════════════
-    //  ACTIONS (Background threads)
-    // ═══════════════════════════════════════════════════════
 
     private String getCodeStub() {
-        ProblemDetail.CodeSnippet s = problem.getCodeSnippetForLang("java");
+        ProblemDetail.CodeSnippet s = problem.getCodeSnippetForLang(currentLang);
         if (s != null) return s.getCode();
-        if (problem.getCodeSnippets() != null && !problem.getCodeSnippets().isEmpty()) return problem.getCodeSnippets().get(0).getCode();
+        if (problem.getCodeSnippets() != null && !problem.getCodeSnippets().isEmpty())
+            return problem.getCodeSnippets().get(0).getCode();
         return "// Write your solution here\n";
     }
 
+    // ═══════════════════════════════════════════════
+    //  ACTIONS
+    // ═══════════════════════════════════════════════
+
     private void handleRunCode() {
-        statusMsg = "⏳ Running code...";
-        resultLines = new ArrayList<>(List.of("Running...", "Please wait..."));
+        statusMsg = Messages.get("status.running");
+        resultLines = new ArrayList<>(List.of(Messages.get("result.running"), Messages.get("result.pleaseWait")));
         new Thread(() -> {
             try {
-                String id = client.runCode(problem.getTitleSlug(), problem.getQuestionId(), "java", String.join("\n", editorLines), String.join("\n", testCaseLines));
+                String id = client.runCode(problem.getTitleSlug(), problem.getQuestionId(),
+                        currentLang, codeEditor.getText(), testEditor.getText());
                 JsonObject r = client.waitForResult(id, 30);
                 resultLines = new ArrayList<>(List.of(formatRunResult(r).split("\n")));
-                statusMsg = "✓ Run complete │ Ctrl+Arrows: switch │ Esc: quit";
+                statusMsg = Messages.get("status.runComplete");
             } catch (Exception e) {
-                resultLines = new ArrayList<>(List.of("Error:", e.getMessage()));
-                statusMsg = "✗ Run failed";
+                resultLines = new ArrayList<>(List.of(Messages.get("result.error"), e.getMessage()));
+                statusMsg = Messages.get("status.runFailed");
             }
-            render(); // Async UI update
+            render();
         }).start();
     }
 
     private void handleSubmitCode() {
-        statusMsg = "⏳ Submitting...";
-        resultLines = new ArrayList<>(List.of("Submitting...", "Please wait..."));
+        statusMsg = Messages.get("status.submitting");
+        resultLines = new ArrayList<>(List.of(Messages.get("result.submitting"), Messages.get("result.pleaseWait")));
         new Thread(() -> {
             try {
-                String id = client.submitCode(problem.getTitleSlug(), problem.getQuestionId(), "java", String.join("\n", editorLines));
+                String id = client.submitCode(problem.getTitleSlug(), problem.getQuestionId(),
+                        currentLang, codeEditor.getText());
                 JsonObject r = client.waitForResult(id, 30);
                 resultLines = new ArrayList<>(List.of(formatSubmitResult(r).split("\n")));
                 boolean ok = r.has("status_msg") && "Accepted".equals(r.get("status_msg").getAsString());
-                statusMsg = ok ? "✓ Accepted! 🎉" : "✗ Not accepted";
+                statusMsg = ok ? Messages.get("status.accepted") : Messages.get("status.notAccepted");
             } catch (Exception e) {
-                resultLines = new ArrayList<>(List.of("Error:", e.getMessage()));
-                statusMsg = "✗ Submit failed";
+                resultLines = new ArrayList<>(List.of(Messages.get("result.error"), e.getMessage()));
+                statusMsg = Messages.get("status.submitFailed");
             }
-            render(); // Async UI update
+            render();
         }).start();
     }
 
     private void handleLoadFile() {
         String slug = problem.getTitleSlug().replace("-", "_");
-        Path file = Path.of(System.getProperty("user.dir"), "solutions", slug + ".java");
+        String ext = SyntaxHighlighter.getFileExtension(currentLang);
+        Path file = Path.of(System.getProperty("user.dir"), "solutions", slug + ext);
         if (Files.exists(file)) {
             try {
-                editorLines = new ArrayList<>(List.of(Files.readString(file).replace("\t", "    ").split("\n", -1)));
-                curLine = 0; curCol = 0; scroll[1] = 0; scrollX = 0; anchorLine = -1;
-                statusMsg = "✓ Loaded: " + file.getFileName();
-            } catch (IOException e) { statusMsg = "✗ " + e.getMessage(); }
+                codeEditor.reset(Files.readString(file));
+                statusMsg = Messages.get("status.loaded", file.getFileName());
+            } catch (IOException e) { statusMsg = "\u2717 " + e.getMessage(); }
         } else {
-            resultLines = new ArrayList<>(List.of("File not found:", "  " + file, "", "Use Ctrl+S to save first."));
-            statusMsg = "Not found: " + file.getFileName();
+            resultLines = new ArrayList<>(List.of(
+                Messages.get("result.fileNotFound"), "  " + file, "",
+                Messages.get("result.useSave")));
+            statusMsg = Messages.get("status.notFound", file.getFileName());
         }
     }
 
     private void handleSaveFile() {
         String slug = problem.getTitleSlug().replace("-", "_");
+        String ext = SyntaxHighlighter.getFileExtension(currentLang);
         Path dir = Path.of(System.getProperty("user.dir"), "solutions");
-        Path file = dir.resolve(slug + ".java");
+        Path file = dir.resolve(slug + ext);
         try {
             Files.createDirectories(dir);
-            Files.writeString(file, String.join("\n", editorLines));
-            statusMsg = "✓ Saved: " + file.getFileName();
-        } catch (IOException e) { statusMsg = "✗ " + e.getMessage(); }
+            Files.writeString(file, codeEditor.getText());
+            statusMsg = Messages.get("status.saved", file.getFileName());
+        } catch (IOException e) { statusMsg = "\u2717 " + e.getMessage(); }
     }
 
-    // ═══════════════════════════════════════════════════════
+    // ═══════════════════════════════════════════════
     //  RESULT FORMATTING
-    // ═══════════════════════════════════════════════════════
+    // ═══════════════════════════════════════════════
 
     private String formatRunResult(JsonObject r) {
         StringBuilder sb = new StringBuilder();
-        if (r.has("compile_error") && !r.get("compile_error").isJsonNull()) return "COMPILE ERROR\n\n" + r.get("compile_error").getAsString();
-        if (r.has("runtime_error") && !r.get("runtime_error").isJsonNull() && !r.get("runtime_error").getAsString().isBlank()) return "RUNTIME ERROR\n\n" + r.get("runtime_error").getAsString();
+        if (r.has("compile_error") && !r.get("compile_error").isJsonNull())
+            return Messages.get("result.compileError") + "\n\n" + r.get("compile_error").getAsString();
+        if (r.has("runtime_error") && !r.get("runtime_error").isJsonNull()
+                && !r.get("runtime_error").getAsString().isBlank())
+            return Messages.get("result.runtimeError") + "\n\n" + r.get("runtime_error").getAsString();
+
         String msg = r.has("status_msg") ? r.get("status_msg").getAsString() : "Unknown";
-        sb.append("Result: ").append(msg).append("\n\n");
+        sb.append(Messages.get("result.result", msg)).append("\n\n");
+
         if (r.has("code_answer") && r.get("code_answer").isJsonArray()) {
             JsonArray ans = r.getAsJsonArray("code_answer");
             JsonArray exp = r.has("expected_code_answer") ? r.getAsJsonArray("expected_code_answer") : null;
             for (int i = 0; i < ans.size(); i++) {
                 String a = ans.get(i).getAsString();
-                sb.append("Test ").append(i + 1).append(": ").append(a);
-                if (exp != null && i < exp.size()) sb.append(a.equals(exp.get(i).getAsString()) ? " ✓" : " ✗ exp:" + exp.get(i).getAsString());
+                sb.append(Messages.get("result.test", i + 1, a));
+                if (exp != null && i < exp.size())
+                    sb.append(a.equals(exp.get(i).getAsString()) ? " \u2713" : " \u2717 exp:" + exp.get(i).getAsString());
                 sb.append("\n");
             }
         }
-        if (r.has("status_runtime") && !r.get("status_runtime").isJsonNull()) sb.append("\nRuntime: ").append(r.get("status_runtime").getAsString());
+
+        if (r.has("status_runtime") && !r.get("status_runtime").isJsonNull())
+            sb.append("\n").append(Messages.get("result.runtime", r.get("status_runtime").getAsString()));
         return sb.toString();
     }
 
     private String formatSubmitResult(JsonObject r) {
         StringBuilder sb = new StringBuilder();
         String msg = r.has("status_msg") ? r.get("status_msg").getAsString() : "Unknown";
-        if ("Accepted".equals(msg)) sb.append("✓ ACCEPTED!\n\n");
+
+        if ("Accepted".equals(msg)) sb.append(Messages.get("result.acceptedBanner")).append("\n\n");
         else sb.append(msg).append("\n\n");
-        if (r.has("status_runtime") && !r.get("status_runtime").isJsonNull()) sb.append("Runtime: ").append(r.get("status_runtime").getAsString()).append("\n");
-        if (r.has("status_memory") && !r.get("status_memory").isJsonNull()) sb.append("Memory:  ").append(r.get("status_memory").getAsString()).append("\n");
-        if (r.has("runtime_percentile") && !r.get("runtime_percentile").isJsonNull()) sb.append("Beats:   ").append(String.format("%.1f%%", r.get("runtime_percentile").getAsDouble())).append("\n");
-        if (r.has("total_testcases") && !r.get("total_testcases").isJsonNull()) sb.append("Tests:   ").append(r.has("total_correct") ? r.get("total_correct").getAsInt() : 0).append("/").append(r.get("total_testcases").getAsInt()).append("\n");
-        if (!"Accepted".equals(msg) && r.has("last_testcase") && !r.get("last_testcase").isJsonNull()) sb.append("\nFailing: ").append(r.get("last_testcase").getAsString()).append("\n");
+
+        if (r.has("status_runtime") && !r.get("status_runtime").isJsonNull())
+            sb.append(Messages.get("result.runtime", r.get("status_runtime").getAsString())).append("\n");
+        if (r.has("status_memory") && !r.get("status_memory").isJsonNull())
+            sb.append(Messages.get("result.memory", r.get("status_memory").getAsString())).append("\n");
+        if (r.has("runtime_percentile") && !r.get("runtime_percentile").isJsonNull())
+            sb.append(Messages.get("result.beats", String.format("%.1f%%", r.get("runtime_percentile").getAsDouble()))).append("\n");
+        if (r.has("total_testcases") && !r.get("total_testcases").isJsonNull())
+            sb.append(Messages.get("result.tests",
+                    r.has("total_correct") ? r.get("total_correct").getAsInt() : 0,
+                    r.get("total_testcases").getAsInt())).append("\n");
+        if (!"Accepted".equals(msg) && r.has("last_testcase") && !r.get("last_testcase").isJsonNull())
+            sb.append("\n").append(Messages.get("result.failing", r.get("last_testcase").getAsString())).append("\n");
         return sb.toString();
     }
 }
