@@ -63,20 +63,45 @@ src/main/resources/
 - **Test case editor**: The test case panel is a full editor (same as the code editor) using `EditorState`, not an append-only text box.
 - **All test cases**: `ProblemDetail.getExampleTestcaseList()` is used to load every example test case, not just the first one.
 
-### Build & Run
+### Quick Install (clone + add to PATH)
+
+**Prerequisites**: Java 20+ and Maven.
 
 ```bash
-# Build fat JAR
-mvn clean package
+git clone https://github.com/Mystic-77/leetcli.git
+cd leetcli
+mvn clean package -q
+```
 
-# Run (any OS with Java 20+)
-java -jar target/leetcli-1.0-SNAPSHOT.jar [command]
+Then add the repo folder to your PATH so `leetcli` works from anywhere:
 
-# Windows shortcut
-leetcli.bat [command]
+**Windows (PowerShell — run once):**
+```powershell
+# Add to current session
+$env:PATH += ";$(Get-Location)"
 
-# Linux/macOS shortcut
-./leetcli.sh [command]
+# Add permanently (user-level)
+[Environment]::SetEnvironmentVariable("Path", $env:PATH + ";$(Get-Location)", "User")
+```
+
+**Linux / macOS:**
+```bash
+chmod +x leetcli.sh
+
+# Add to your shell profile (~/.bashrc, ~/.zshrc, etc.)
+echo 'export PATH="'$(pwd)':$PATH"' >> ~/.bashrc
+source ~/.bashrc
+
+# Use via: leetcli.sh solve two-sum
+```
+
+After setup, run from anywhere:
+```bash
+# Windows
+leetcli solve two-sum
+
+# Linux/macOS
+leetcli.sh solve two-sum
 ```
 
 ### Docker (zero-install)
