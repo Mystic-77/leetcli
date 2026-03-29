@@ -81,10 +81,30 @@ leetcli.bat [command]
 
 ### Docker (zero-install)
 
+No Java required — just Docker.
+
 ```bash
+# 1. Build the image (one time)
 docker build -t leetcli .
-docker run -it leetcli solve two-sum
+
+# 2. Login (interactive — will prompt for session cookie)
+docker run -it -v leetcli-data:/root/.leetcli leetcli login
+
+# 3. List problems
+docker run -it -v leetcli-data:/root/.leetcli leetcli list
+
+# 4. Solve a problem (TUI)
+docker run -it -v leetcli-data:/root/.leetcli -v "$(pwd)/solutions:/app/solutions" leetcli solve two-sum
 ```
+
+**Flags explained:**
+| Flag | Purpose |
+|------|---------|
+| `-it` | Allocates a TTY for JLine's terminal handling |
+| `-v leetcli-data:/root/.leetcli` | Persists login session across runs |
+| `-v "$(pwd)/solutions:/app/solutions"` | Syncs saved solutions to your local `solutions/` folder |
+
+> On Windows (PowerShell), replace `$(pwd)` with `${PWD}`.
 
 ### CLI Commands
 
@@ -103,7 +123,14 @@ docker run -it leetcli solve two-sum
 | F6 | Submit solution |
 | F7 | Load solution from file |
 | F8 | Switch programming language |
-| Ctrl+S | Save solution to file |
+| Ctrl+S | Manual save to file |
 | Ctrl+Arrow | Switch panel |
 | Shift+Arrow | Select text in editor |
-| Esc | Quit TUI |
+| Esc | Quit TUI (auto-saves on exit) |
+
+### Auto-Save & Auto-Load
+
+- **Auto-save**: Your code is automatically saved to `solutions/<slug>.<ext>` 2 seconds after your last edit. A final save also runs on quit.
+- **Auto-load**: When you open a problem, if a saved file already exists for it, the editor loads your previous code instead of the default stub.
+- **Manual save/load**: Ctrl+S and F7 still work as explicit overrides.
+

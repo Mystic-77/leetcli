@@ -15,6 +15,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Timer;
+import java.util.TimerTask;
 
 /**
  * Multi-panel TUI orchestrator.
@@ -49,6 +51,10 @@ public class MainTUI {
 
     private String statusMsg = "";
     private volatile boolean running = true;
+
+    // Auto-save: debounced timer fires 2s after last edit
+    private Timer autoSaveTimer;
+    private static final long AUTO_SAVE_DELAY_MS = 2000;
 
     public MainTUI(LeetCodeClient client, ProblemDetail problem, ConfigManager config) {
         this.client = client;
@@ -91,6 +97,9 @@ public class MainTUI {
                 handleInput();
             }
         } finally {
+            // Final save before exit
+            silentSave();
+            if (autoSaveTimer != null) autoSaveTimer.cancel();
             writer.print(Theme.SHOW_CURSOR + Theme.RESET + Theme.ALT_BUF_OFF);
             writer.flush();
             terminal.close();
@@ -106,8 +115,9 @@ public class MainTUI {
         String desc = HtmlToText.convert(problem.getContent());
         problemLines = new ArrayList<>(List.of(desc.replace("\t", "    ").split("\n")));
 
-        // Code editor
-        codeEditor = new EditorState(getCodeStub());
+        // Code editor — auto-load from saved file if available
+        String savedCode = tryLoadSavedFile();
+        codeEditor = new EditorState(savedCode != null ? savedCode : getCodeStub());
 
         // Test cases — load ALL examples, not just the first
         String allTests = buildAllTestCases();
@@ -195,11 +205,11 @@ public class MainTUI {
             case END         -> { if (isEditorActive()) getActiveEditor().end(false); }
             case SHIFT_HOME  -> { if (isEditorActive()) getActiveEditor().home(true); }
             case SHIFT_END   -> { if (isEditorActive()) getActiveEditor().end(true); }
-            case DELETE      -> { if (isEditorActive()) getActiveEditor().delete(); }
-            case BACKSPACE   -> { if (isEditorActive()) getActiveEditor().backspace(); }
-            case TAB         -> { if (isEditorActive()) getActiveEditor().insertTab(); }
-            case ENTER       -> { if (isEditorActive()) getActiveEditor().enter(); }
-            case CHAR        -> { if (isEditorActive()) getActiveEditor().insertChar(ev.ch()); }
+            case DELETE      -> { if (isEditorActive()) { getActiveEditor().delete(); scheduleAutoSave(); } }
+            case BACKSPACE   -> { if (isEditorActive()) { getActiveEditor().backspace(); scheduleAutoSave(); } }
+            case TAB         -> { if (isEditorActive()) { getActiveEditor().insertTab(); scheduleAutoSave(); } }
+            case ENTER       -> { if (isEditorActive()) { getActiveEditor().enter(); scheduleAutoSave(); } }
+            case CHAR        -> { if (isEditorActive()) { getActiveEditor().insertChar(ev.ch()); scheduleAutoSave(); } }
 
             // ── Actions ──
             case RUN         -> handleRunCode();
@@ -337,6 +347,40 @@ public class MainTUI {
             Files.writeString(file, codeEditor.getText());
             statusMsg = Messages.get("status.saved", file.getFileName());
         } catch (IOException e) { statusMsg = "\u2717 " + e.getMessage(); }
+    }
+
+    /** Try to load a previously saved file for the current problem/lang. */
+    private String tryLoadSavedFile() {
+        String slug = problem.getTitleSlug().replace("-", "_");
+        String ext = SyntaxHighlighter.getFileExtension(currentLang);
+        Path file = Path.of(System.getProperty("user.dir"), "solutions", slug + ext);
+        if (Files.exists(file)) {
+            try {
+                statusMsg = Messages.get("status.loaded", file.getFileName());
+                return Files.readString(file);
+            } catch (IOException ignored) {}
+        }
+        return null;
+    }
+
+    /** Silent save — no status message update (used for auto-save and exit save). */
+    private void silentSave() {
+        try {
+            String slug = problem.getTitleSlug().replace("-", "_");
+            String ext = SyntaxHighlighter.getFileExtension(currentLang);
+            Path dir = Path.of(System.getProperty("user.dir"), "solutions");
+            Files.createDirectories(dir);
+            Files.writeString(dir.resolve(slug + ext), codeEditor.getText());
+        } catch (IOException ignored) {}
+    }
+
+    /** Schedule an auto-save 2 seconds after the last edit (debounced). */
+    private void scheduleAutoSave() {
+        if (autoSaveTimer != null) autoSaveTimer.cancel();
+        autoSaveTimer = new Timer(true); // daemon thread
+        autoSaveTimer.schedule(new TimerTask() {
+            @Override public void run() { silentSave(); }
+        }, AUTO_SAVE_DELAY_MS);
     }
 
     // ═══════════════════════════════════════════════
