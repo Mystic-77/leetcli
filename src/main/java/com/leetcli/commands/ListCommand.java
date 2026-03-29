@@ -3,13 +3,16 @@ package com.leetcli.commands;
 import com.leetcli.api.LeetCodeClient;
 import com.leetcli.api.models.Problem;
 import com.leetcli.config.ConfigManager;
+import com.leetcli.tui.ProblemBrowser;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
 
 import java.util.List;
 
 /**
- * List and filter LeetCode problems.
+ * Browse LeetCode problems.
+ * - No flags  → interactive TUI browser (arrow keys, Enter to open)
+ * - With flags → static table output (scriptable / pipe-friendly)
  */
 @Command(
     name = "list",
@@ -17,19 +20,22 @@ import java.util.List;
 )
 public class ListCommand implements Runnable {
 
-    @Option(names = {"-l", "--limit"}, description = "Number of problems to show (default: 20)",
+    @Option(names = {"-l", "--limit"}, description = "Table mode: rows to show (default: 20)",
             defaultValue = "20")
     private int limit;
 
-    @Option(names = {"-p", "--page"}, description = "Page number (default: 1)",
+    @Option(names = {"-p", "--page"}, description = "Table mode: page number (default: 1)",
             defaultValue = "1")
     private int page;
 
-    @Option(names = {"-d", "--difficulty"}, description = "Filter by difficulty: EASY, MEDIUM, HARD")
+    @Option(names = {"-d", "--difficulty"}, description = "Filter: EASY, MEDIUM, HARD")
     private String difficulty;
 
     @Option(names = {"-s", "--search"}, description = "Search by keyword")
     private String search;
+
+    @Option(names = {"--no-tui"}, description = "Force table output even without other flags")
+    private boolean noTui;
 
     @Override
     public void run() {
@@ -37,63 +43,63 @@ public class ListCommand implements Runnable {
         LeetCodeClient client = new LeetCodeClient(config);
 
         if (!client.hasCredentials()) {
-            System.err.println("\n  ✗ Not logged in. Run 'leetcli login' first.\n");
+            System.err.println("\n  Not logged in. Run 'leetcli login' first.\n");
             return;
         }
 
-        System.out.println("\n  ⏳ Fetching problems...\n");
+        boolean wantsTable = noTui || difficulty != null || search != null || page > 1;
 
+        if (!wantsTable) {
+            try {
+                new ProblemBrowser(client, config).run();
+            } catch (Exception e) {
+                System.err.println("  TUI error: " + e.getMessage());
+                System.err.println("  Falling back to table output...\n");
+                printTable(client);
+            }
+        } else {
+            printTable(client);
+        }
+    }
+
+    private void printTable(LeetCodeClient client) {
+        System.out.println("\n  Fetching problems...\n");
         try {
             int skip = (page - 1) * limit;
             List<Problem> problems = client.listProblems(limit, skip, difficulty, search);
 
             if (problems.isEmpty()) {
-                System.out.println("  No problems found matching your criteria.\n");
+                System.out.println("  No problems found.\n");
                 return;
             }
 
-            // Header
-            System.out.printf("  %-4s %-6s %-50s %-12s %8s%n",
-                    "  ", "ID", "Title", "Difficulty", "AC Rate");
-            System.out.println("  " + "─".repeat(84));
+            System.out.printf("  %-2s  %-6s  %-50s  %-8s  %6s%n", "", "#", "Title", "Diff", "AC%");
+            System.out.println("  " + "─".repeat(80));
 
-            // Problem rows
             for (Problem p : problems) {
-                String statusIcon = p.getStatusIcon();
-                String id = p.getFrontendQuestionId();
                 String title = p.getTitle();
-                if (title.length() > 48) {
-                    title = title.substring(0, 45) + "...";
-                }
-                String diff = p.getDifficulty();
-                String acRate = String.format("%.1f%%", p.getAcRate());
+                if (title.length() > 48) title = title.substring(0, 45) + "...";
+                if (p.isPaidOnly()) title = "🔒 " + title;
 
-                // Lock icon for premium
-                if (p.isPaidOnly()) {
-                    title = "🔒 " + title;
-                }
-
-                String diffDisplay = switch (diff) {
-                    case "Easy" -> "🟢 Easy  ";
+                String diff = switch (p.getDifficulty()) {
+                    case "Easy"   -> "🟢 Easy  ";
                     case "Medium" -> "🟡 Medium";
-                    case "Hard" -> "🔴 Hard  ";
-                    default -> diff;
+                    case "Hard"   -> "🔴 Hard  ";
+                    default -> p.getDifficulty();
                 };
 
-                System.out.printf("  [%s] %-6s %-50s %-12s %8s%n",
-                        statusIcon, id, title, diffDisplay, acRate);
+                System.out.printf("  [%s] %-6s  %-50s  %-10s  %5.1f%%%n",
+                        p.getStatusIcon(),
+                        p.getFrontendQuestionId(),
+                        title, diff,
+                        p.getAcRate());
             }
 
-            System.out.println("  " + "─".repeat(84));
-            System.out.printf("  Page %d  |  Showing %d problems", page, problems.size());
-            if (difficulty != null) System.out.printf("  |  Filter: %s", difficulty);
-            if (search != null) System.out.printf("  |  Search: \"%s\"", search);
-            System.out.println("\n");
-            System.out.println("  💡 Use 'leetcli solve <problem-slug>' to start solving!");
-            System.out.println("     e.g., leetcli solve two-sum\n");
+            System.out.println("  " + "─".repeat(80));
+            System.out.printf("  Page %d  |  %d problems shown%n%n", page, problems.size());
 
         } catch (Exception e) {
-            System.err.println("  ✗ Error: " + e.getMessage() + "\n");
+            System.err.println("  Error: " + e.getMessage() + "\n");
         }
     }
 }
