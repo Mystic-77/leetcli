@@ -63,6 +63,15 @@ src/main/resources/
 - **Test case editor**: The test case panel is a full editor (same as the code editor) using `EditorState`, not an append-only text box.
 - **All test cases**: `ProblemDetail.getExampleTestcaseList()` is used to load every example test case, not just the first one.
 
+### AI Development Workflow (Mandatory for Assistants)
+
+To maintain high code quality, system stability, and fast bug isolation, all AI models or coding assistants interacting with this repository MUST follow these rules:
+
+1.  **Feature Branches**: Never work directly on the `main` branch. Always create a new branch from the latest `main` using the `feat/` prefix (e.g., `git checkout -b feat/task-name main`). Pushes should be made to the remote repository under this feature branch for tracking.
+2.  **Granular Commits**: Commit one logical change at a time. Each commit should address a single focused task, bug fix, or refactor step. Do not group unrelated changes into a single massive commit, as this hinders bug isolation. Use descriptive [Conventional Commits](https://www.conventionalcommits.org/) (e.g., `feat:`, `fix:`, `refactor:`, `docs:`).
+3.  **Build Validation**: Always run `mvn compile` (or the primary build command) before each commit to ensure the project remains in a stable and compilable state. If a change causes a build failure, fix it within the same granular step.
+4.  **Merge via User Approval**: Once a feature is complete on its branch, push the branch and request the user to review and merge into `main`. Keep project walkthroughs, task lists, or status documents updated as you work.
+
 ### Quick Install (clone + add to PATH)
 
 **Prerequisites**: Java 20+ and Maven.
