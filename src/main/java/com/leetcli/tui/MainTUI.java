@@ -26,7 +26,6 @@ public class MainTUI {
 
     private final LeetCodeClient client;
     private final ProblemDetail problem;
-    private final ConfigManager config;
 
     private Terminal terminal;
     private PrintWriter writer;
@@ -56,19 +55,34 @@ public class MainTUI {
     private Timer autoSaveTimer;
     private static final long AUTO_SAVE_DELAY_MS = 2000;
 
+    private boolean externalTerminal = false;
+
     public MainTUI(LeetCodeClient client, ProblemDetail problem, ConfigManager config) {
         this.client = client;
         this.problem = problem;
-        this.config = config;
+    }
+
+    public MainTUI(LeetCodeClient client, ProblemDetail problem, ConfigManager config, Terminal terminal, PrintWriter writer) {
+        this.client = client;
+        this.problem = problem;
+        this.terminal = terminal;
+        this.writer = writer;
+        this.externalTerminal = (terminal != null);
     }
 
     public void run() throws IOException {
-        terminal = TerminalBuilder.builder().system(true).jansi(true).build();
-        terminal.enterRawMode();
-        writer = terminal.writer();
+        if (!externalTerminal) {
+            terminal = TerminalBuilder.builder().system(true).jansi(true).build();
+            terminal.enterRawMode();
+            writer = terminal.writer();
 
-        writer.print(Theme.ALT_BUF_ON + Theme.HIDE_CURSOR + Theme.CLEAR);
-        writer.flush();
+            writer.print(Theme.ALT_BUF_ON + Theme.HIDE_CURSOR + Theme.CLEAR);
+            writer.flush();
+        } else {
+            // Clear once when entering solver from browser
+            writer.print(Theme.CLEAR);
+            writer.flush();
+        }
 
         try {
             initPanels();
@@ -100,9 +114,12 @@ public class MainTUI {
             // Final save before exit
             silentSave();
             if (autoSaveTimer != null) autoSaveTimer.cancel();
-            writer.print(Theme.SHOW_CURSOR + Theme.RESET + Theme.ALT_BUF_OFF);
-            writer.flush();
-            terminal.close();
+            
+            if (!externalTerminal) {
+                writer.print(Theme.SHOW_CURSOR + Theme.RESET + Theme.ALT_BUF_OFF);
+                writer.flush();
+                terminal.close();
+            }
         }
     }
 
@@ -320,58 +337,68 @@ public class MainTUI {
         }).start();
     }
 
-    private void handleLoadFile() {
+    private Path solutionsDir() {
+        return Path.of(System.getProperty("user.dir"), "solutions");
+    }
+
+    private Path getSafeSolutionFile() {
         String slug = problem.getTitleSlug().replace("-", "_");
+        if (!slug.matches("^[a-zA-Z0-9_-]+$")) {
+            throw new IllegalArgumentException("Invalid slug: " + slug);
+        }
         String ext = SyntaxHighlighter.getFileExtension(currentLang);
-        Path file = Path.of(System.getProperty("user.dir"), "solutions", slug + ext);
-        if (Files.exists(file)) {
-            try {
+        Path dir = solutionsDir();
+        Path file = dir.resolve(slug + ext).normalize();
+        
+        if (!file.startsWith(dir.normalize())) {
+            throw new IllegalArgumentException("Path traversal detected");
+        }
+        return file;
+    }
+
+    private void handleLoadFile() {
+        try {
+            Path file = getSafeSolutionFile();
+            if (Files.exists(file)) {
                 codeEditor.reset(Files.readString(file));
                 statusMsg = Messages.get("status.loaded", file.getFileName());
-            } catch (IOException e) { statusMsg = "\u2717 " + e.getMessage(); }
-        } else {
-            resultLines = new ArrayList<>(List.of(
-                Messages.get("result.fileNotFound"), "  " + file, "",
-                Messages.get("result.useSave")));
-            statusMsg = Messages.get("status.notFound", file.getFileName());
-        }
+            } else {
+                resultLines = new ArrayList<>(List.of(
+                    Messages.get("result.fileNotFound"), "  " + file, "",
+                    Messages.get("result.useSave")));
+                statusMsg = Messages.get("status.notFound", file.getFileName());
+            }
+        } catch (Exception e) { statusMsg = "\u2717 " + e.getMessage(); }
     }
 
     private void handleSaveFile() {
-        String slug = problem.getTitleSlug().replace("-", "_");
-        String ext = SyntaxHighlighter.getFileExtension(currentLang);
-        Path dir = Path.of(System.getProperty("user.dir"), "solutions");
-        Path file = dir.resolve(slug + ext);
         try {
-            Files.createDirectories(dir);
+            Path file = getSafeSolutionFile();
+            Files.createDirectories(file.getParent());
             Files.writeString(file, codeEditor.getText());
             statusMsg = Messages.get("status.saved", file.getFileName());
-        } catch (IOException e) { statusMsg = "\u2717 " + e.getMessage(); }
+        } catch (Exception e) { statusMsg = "\u2717 " + e.getMessage(); }
     }
 
     /** Try to load a previously saved file for the current problem/lang. */
     private String tryLoadSavedFile() {
-        String slug = problem.getTitleSlug().replace("-", "_");
-        String ext = SyntaxHighlighter.getFileExtension(currentLang);
-        Path file = Path.of(System.getProperty("user.dir"), "solutions", slug + ext);
-        if (Files.exists(file)) {
-            try {
+        try {
+            Path file = getSafeSolutionFile();
+            if (Files.exists(file)) {
                 statusMsg = Messages.get("status.loaded", file.getFileName());
                 return Files.readString(file);
-            } catch (IOException ignored) {}
-        }
+            }
+        } catch (Exception ignored) {}
         return null;
     }
 
     /** Silent save — no status message update (used for auto-save and exit save). */
     private void silentSave() {
         try {
-            String slug = problem.getTitleSlug().replace("-", "_");
-            String ext = SyntaxHighlighter.getFileExtension(currentLang);
-            Path dir = Path.of(System.getProperty("user.dir"), "solutions");
-            Files.createDirectories(dir);
-            Files.writeString(dir.resolve(slug + ext), codeEditor.getText());
-        } catch (IOException ignored) {}
+            Path file = getSafeSolutionFile();
+            Files.createDirectories(file.getParent());
+            Files.writeString(file, codeEditor.getText());
+        } catch (Exception ignored) {}
     }
 
     /** Schedule an auto-save 2 seconds after the last edit (debounced). */

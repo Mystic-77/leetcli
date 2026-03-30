@@ -21,17 +21,39 @@ import java.util.concurrent.TimeUnit;
  */
 public class LeetCodeClient {
 
-    private static final String BASE_URL = "https://leetcode.com";
-    private static final String GRAPHQL_URL = BASE_URL + "/graphql/";
-    private static final MediaType JSON_MEDIA = MediaType.get("application/json; charset=utf-8");
-    private static final Gson GSON = new Gson();
-
+    private final String baseUrl;
+    private final String graphqlUrl;
     private final OkHttpClient httpClient;
     private final ConfigManager configManager;
 
+    private static final String DEFAULT_BASE_URL = "https://leetcode.com";
+    private static final MediaType JSON_MEDIA = MediaType.get("application/json; charset=utf-8");
+    private static final Gson GSON = new Gson();
+
     public LeetCodeClient(ConfigManager configManager) {
+        this(configManager, DEFAULT_BASE_URL);
+    }
+
+    public LeetCodeClient(ConfigManager configManager, String baseUrl) {
         this.configManager = configManager;
+        this.baseUrl = baseUrl;
+        
+        if (!baseUrl.startsWith("https://") && !baseUrl.contains("localhost") 
+                && !baseUrl.contains("127.0.0.1") && !baseUrl.contains("[::1]") 
+                && !baseUrl.matches("http://[^/]+:\\d+.*")) {
+            throw new IllegalArgumentException("BASE_URL must use HTTPS: " + baseUrl);
+        }
+        
+        this.graphqlUrl = baseUrl + "/graphql/";
+        
+        CertificatePinner pinner = new CertificatePinner.Builder()
+                .add("leetcode.com", "sha256/7Y3ExpJ1tcp3IVH+pNTe1T43fkah7S1F0/mMGtbpdfI=")
+                .add("leetcode.com", "sha256/kIdp6NNEd8wsugYyyIYFsi1ylMCED3hZbSR8ZFsa/A4=")
+                .add("leetcode.com", "sha256/mEflZT5enoR1FuXLgYYGqnVEoZvmf9c2bVBpiOjYQ0c=")
+                .build();
+                
         this.httpClient = new OkHttpClient.Builder()
+                .certificatePinner(pinner)
                 .connectTimeout(15, TimeUnit.SECONDS)
                 .readTimeout(30, TimeUnit.SECONDS)
                 .writeTimeout(15, TimeUnit.SECONDS)
@@ -79,6 +101,26 @@ public class LeetCodeClient {
     //  Problem Listing
     // ─────────────────────────────────────────────────────────
 
+    private static final java.util.Set<String> VALID_DIFFICULTIES = java.util.Set.of("EASY", "MEDIUM", "HARD");
+
+    private Map<String, Object> buildFilters(String difficulty, String searchKeyword) {
+        Map<String, Object> filters = new HashMap<>();
+        if (difficulty != null && !difficulty.isBlank()) {
+            String upper = difficulty.toUpperCase();
+            if (!VALID_DIFFICULTIES.contains(upper)) {
+                throw new IllegalArgumentException("Invalid difficulty: " + difficulty);
+            }
+            filters.put("difficulty", upper);
+        }
+        if (searchKeyword != null && !searchKeyword.isBlank()) {
+            if (searchKeyword.length() > 100) {
+                throw new IllegalArgumentException("Search keyword too long (max 100 chars)");
+            }
+            filters.put("searchKeywords", searchKeyword);
+        }
+        return filters;
+    }
+
     /**
      * Fetch a paginated list of problems with optional filters.
      */
@@ -88,15 +130,7 @@ public class LeetCodeClient {
         variables.put("categorySlug", "");
         variables.put("limit", limit);
         variables.put("skip", skip);
-
-        Map<String, Object> filters = new HashMap<>();
-        if (difficulty != null && !difficulty.isBlank()) {
-            filters.put("difficulty", difficulty.toUpperCase());
-        }
-        if (searchKeyword != null && !searchKeyword.isBlank()) {
-            filters.put("searchKeywords", searchKeyword);
-        }
-        variables.put("filters", filters);
+        variables.put("filters", buildFilters(difficulty, searchKeyword));
 
         JsonObject response = graphqlRequest(GraphQLQueries.PROBLEM_LIST, variables);
 
@@ -124,12 +158,7 @@ public class LeetCodeClient {
         variables.put("categorySlug", "");
         variables.put("limit", 1);
         variables.put("skip", 0);
-
-        Map<String, Object> filters = new HashMap<>();
-        if (difficulty != null && !difficulty.isBlank()) {
-            filters.put("difficulty", difficulty.toUpperCase());
-        }
-        variables.put("filters", filters);
+        variables.put("filters", buildFilters(difficulty, null));
 
         JsonObject response = graphqlRequest(GraphQLQueries.PROBLEM_LIST, variables);
         if (response != null && response.has("data")) {
@@ -174,7 +203,7 @@ public class LeetCodeClient {
      */
     public String runCode(String titleSlug, String questionId, String lang,
                           String typedCode, String testCases) throws IOException {
-        String url = BASE_URL + "/problems/" + titleSlug + "/interpret_solution/";
+        String url = baseUrl + "/problems/" + titleSlug + "/interpret_solution/";
 
         JsonObject body = new JsonObject();
         body.addProperty("lang", lang);
@@ -204,7 +233,7 @@ public class LeetCodeClient {
      */
     public String submitCode(String titleSlug, String questionId, String lang,
                              String typedCode) throws IOException {
-        String url = BASE_URL + "/problems/" + titleSlug + "/submit/";
+        String url = baseUrl + "/problems/" + titleSlug + "/submit/";
 
         JsonObject body = new JsonObject();
         body.addProperty("lang", lang);
@@ -232,7 +261,7 @@ public class LeetCodeClient {
      * Returns the full result object once complete.
      */
     public JsonObject checkResult(String submissionId) throws IOException {
-        String url = BASE_URL + "/submissions/detail/" + submissionId + "/check/";
+        String url = baseUrl + "/submissions/detail/" + submissionId + "/check/";
 
         Request request = buildAuthenticatedRequest(url)
                 .get()
@@ -289,14 +318,13 @@ public class LeetCodeClient {
             body.add("variables", GSON.toJsonTree(variables));
         }
 
-        Request request = buildAuthenticatedRequest(GRAPHQL_URL)
+        Request request = buildAuthenticatedRequest(graphqlUrl)
                 .post(RequestBody.create(GSON.toJson(body), JSON_MEDIA))
                 .build();
 
         try (Response response = httpClient.newCall(request).execute()) {
             if (!response.isSuccessful()) {
-                throw new IOException("LeetCode API returned HTTP " + response.code()
-                        + ": " + response.message());
+                throw new IOException("LeetCode API returned HTTP " + response.code());
             }
             String responseBody = response.body().string();
             return GSON.fromJson(responseBody, JsonObject.class);
@@ -313,8 +341,8 @@ public class LeetCodeClient {
         Request.Builder builder = new Request.Builder()
                 .url(url)
                 .header("Content-Type", "application/json")
-                .header("Referer", BASE_URL + "/")
-                .header("Origin", BASE_URL)
+                .header("Referer", baseUrl + "/")
+                .header("Origin", baseUrl)
                 .header("User-Agent", "LeetCLI/1.0");
 
         if (session != null && csrfToken != null) {

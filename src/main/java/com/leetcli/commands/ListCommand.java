@@ -1,12 +1,10 @@
 package com.leetcli.commands;
 
 import com.leetcli.api.LeetCodeClient;
-import com.leetcli.api.models.Problem;
 import com.leetcli.config.ConfigManager;
+import com.leetcli.tui.ProblemBrowser;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
-
-import java.util.List;
 
 /**
  * List and filter LeetCode problems.
@@ -41,57 +39,10 @@ public class ListCommand implements Runnable {
             return;
         }
 
-        System.out.println("\n  ⏳ Fetching problems...\n");
-
         try {
-            int skip = (page - 1) * limit;
-            List<Problem> problems = client.listProblems(limit, skip, difficulty, search);
-
-            if (problems.isEmpty()) {
-                System.out.println("  No problems found matching your criteria.\n");
-                return;
-            }
-
-            // Header
-            System.out.printf("  %-4s %-6s %-50s %-12s %8s%n",
-                    "  ", "ID", "Title", "Difficulty", "AC Rate");
-            System.out.println("  " + "─".repeat(84));
-
-            // Problem rows
-            for (Problem p : problems) {
-                String statusIcon = p.getStatusIcon();
-                String id = p.getFrontendQuestionId();
-                String title = p.getTitle();
-                if (title.length() > 48) {
-                    title = title.substring(0, 45) + "...";
-                }
-                String diff = p.getDifficulty();
-                String acRate = String.format("%.1f%%", p.getAcRate());
-
-                // Lock icon for premium
-                if (p.isPaidOnly()) {
-                    title = "🔒 " + title;
-                }
-
-                String diffDisplay = switch (diff) {
-                    case "Easy" -> "🟢 Easy  ";
-                    case "Medium" -> "🟡 Medium";
-                    case "Hard" -> "🔴 Hard  ";
-                    default -> diff;
-                };
-
-                System.out.printf("  [%s] %-6s %-50s %-12s %8s%n",
-                        statusIcon, id, title, diffDisplay, acRate);
-            }
-
-            System.out.println("  " + "─".repeat(84));
-            System.out.printf("  Page %d  |  Showing %d problems", page, problems.size());
-            if (difficulty != null) System.out.printf("  |  Filter: %s", difficulty);
-            if (search != null) System.out.printf("  |  Search: \"%s\"", search);
-            System.out.println("\n");
-            System.out.println("  💡 Use 'leetcli solve <problem-slug>' to start solving!");
-            System.out.println("     e.g., leetcli solve two-sum\n");
-
+            ProblemBrowser browser = new ProblemBrowser(client, config);
+            browser.setInitialState(difficulty, search, page);
+            browser.run();
         } catch (Exception e) {
             System.err.println("  ✗ Error: " + e.getMessage() + "\n");
         }
