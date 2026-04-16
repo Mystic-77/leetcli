@@ -17,7 +17,7 @@ public final class InputHandler {
         HOME, END, SHIFT_HOME, SHIFT_END,
         DELETE, BACKSPACE, TAB, ENTER,
         SAVE, RUN, SUBMIT, LOAD_FILE, SWITCH_LANG,
-        QUIT, CHAR, NONE
+        QUIT, CHAR, NONE, CTRL_SPACE, ESCAPE
     }
 
     public record KeyEvent(Action action, char ch) {
@@ -30,9 +30,12 @@ public final class InputHandler {
         int c = reader.read(100);  // 100ms timeout — returns -2 on timeout
         if (c == -1 || c == -2) return KeyEvent.of(Action.NONE);
 
+        // Ctrl+Space sends NUL (ASCII 0)
+        if (c == 0) return KeyEvent.of(Action.CTRL_SPACE);
+
         if (c == 27) {
             int c2 = reader.read(200);
-            if (c2 == -1 || c2 == -2) return KeyEvent.of(Action.QUIT);
+            if (c2 == -1 || c2 == -2) return KeyEvent.of(Action.ESCAPE);
             if (c2 == 'O') {
                 int c3 = reader.read();
                 if (c3 <= 0) return KeyEvent.of(Action.NONE);

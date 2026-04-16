@@ -101,12 +101,35 @@ public class EditorState {
 
     public void end(boolean shift) { startSelection(shift); curCol = lines.get(curLine).length(); }
 
+    // ── Auto-close pairs ──
+    private static final String OPENERS = "({[\"'";
+    private static final String CLOSERS = ")}]\"'";
+
+    private static char matchingClose(char c) {
+        int idx = OPENERS.indexOf(c);
+        return idx >= 0 ? CLOSERS.charAt(idx) : '\0';
+    }
+
     // ── Editing ──
     public void insertChar(char c) {
         if (anchorLine != -1) deleteSelection();
         String line = lines.get(curLine);
-        lines.set(curLine, line.substring(0, curCol) + c + line.substring(curCol));
-        curCol++;
+
+        // Skip-over: if typing a closer that's already at cursor, just move right
+        if (CLOSERS.indexOf(c) >= 0 && curCol < line.length() && line.charAt(curCol) == c) {
+            curCol++;
+            return;
+        }
+
+        // Auto-close: insert matching closer after the character
+        char closer = matchingClose(c);
+        if (closer != '\0') {
+            lines.set(curLine, line.substring(0, curCol) + c + closer + line.substring(curCol));
+            curCol++; // cursor stays between the pair
+        } else {
+            lines.set(curLine, line.substring(0, curCol) + c + line.substring(curCol));
+            curCol++;
+        }
     }
 
     public void insertTab() {
@@ -119,16 +142,71 @@ public class EditorState {
     public void enter() {
         if (anchorLine != -1) deleteSelection();
         String line = lines.get(curLine);
-        lines.set(curLine, line.substring(0, curCol));
-        lines.add(curLine + 1, line.substring(curCol));
-        curLine++; curCol = 0;
+        String before = line.substring(0, curCol);
+        String after = line.substring(curCol);
+
+        // Copy leading whitespace from the current line
+        String indent = leadingWhitespace(line);
+
+        // Check if the character before cursor is an opening bracket
+        char lastChar = before.isBlank() ? '\0' : before.stripTrailing().charAt(before.stripTrailing().length() - 1);
+        boolean openBracket = lastChar == '{' || lastChar == '(' || lastChar == '[';
+
+        // Check if cursor is between matching brackets: {|}, (|), [|]
+        char firstAfter = after.isBlank() ? '\0' : after.stripLeading().charAt(0);
+        boolean betweenPair = openBracket && isMatchingClose(lastChar, firstAfter);
+
+        lines.set(curLine, before);
+
+        if (betweenPair) {
+            // Split into 3 lines: before / indented cursor line / closer with original indent
+            String innerIndent = indent + "    ";
+            lines.add(curLine + 1, innerIndent);
+            lines.add(curLine + 2, indent + after.stripLeading());
+            curLine++;
+            curCol = innerIndent.length();
+        } else if (openBracket) {
+            // Extra indent after opening bracket
+            String newIndent = indent + "    ";
+            lines.add(curLine + 1, newIndent + after);
+            curLine++;
+            curCol = newIndent.length();
+        } else {
+            // Normal enter — preserve indentation
+            lines.add(curLine + 1, indent + after);
+            curLine++;
+            curCol = indent.length();
+        }
+    }
+
+    /** Extract leading whitespace from a line. */
+    private static String leadingWhitespace(String line) {
+        int i = 0;
+        while (i < line.length() && (line.charAt(i) == ' ' || line.charAt(i) == '\t')) i++;
+        return line.substring(0, i);
+    }
+
+    /** Check if closer matches the opener. */
+    private static boolean isMatchingClose(char open, char close) {
+        return (open == '{' && close == '}')
+            || (open == '(' && close == ')')
+            || (open == '[' && close == ']');
     }
 
     public void backspace() {
         if (anchorLine != -1) { deleteSelection(); return; }
         if (curCol > 0) {
             String line = lines.get(curLine);
-            lines.set(curLine, line.substring(0, curCol - 1) + line.substring(curCol));
+            char deleted = line.charAt(curCol - 1);
+
+            // Smart pair deletion: if deleting an opener and its closer is right after cursor
+            char closer = matchingClose(deleted);
+            if (closer != '\0' && curCol < line.length() && line.charAt(curCol) == closer) {
+                // Delete both opener and closer
+                lines.set(curLine, line.substring(0, curCol - 1) + line.substring(curCol + 1));
+            } else {
+                lines.set(curLine, line.substring(0, curCol - 1) + line.substring(curCol));
+            }
             curCol--;
         } else if (curLine > 0) {
             String current = lines.remove(curLine);
