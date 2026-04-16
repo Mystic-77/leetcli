@@ -51,6 +51,9 @@ public class MainTUI {
     private String statusMsg = "";
     private volatile boolean running = true;
 
+    // Completion popup
+    private final CompletionState completion = new CompletionState();
+
     // Auto-save: debounced timer fires 2s after last edit
     private Timer autoSaveTimer;
     private static final long AUTO_SAVE_DELAY_MS = 2000;
@@ -189,7 +192,25 @@ public class MainTUI {
             active, currentLang, statusMsg
         );
         writer.print(frame);
+
+        // Completion popup overlay (only in code editor panel)
+        if (completion.isVisible() && active == 1) {
+            int[] pos = cursorTerminalPos();
+            String popupStr = Renderer.renderPopup(completion, pos[0], pos[1], H);
+            writer.print(popupStr);
+        }
+
         writer.flush();
+    }
+
+    /** Compute the terminal row/col of the code editor's cursor. */
+    private int[] cursorTerminalPos() {
+        int leftW = W / 2;
+        // Editor panel starts at column leftW + 2 (border + 1)
+        int col = leftW + 2 + (codeEditor.getCurCol() - codeEditor.getScrollX());
+        // Row 1 = title, Row 2 = top border, content starts at row 3
+        int row = 3 + (codeEditor.getCurLine() - codeEditor.getScrollY());
+        return new int[]{row, col};
     }
 
     // ═══════════════════════════════════════════════
@@ -199,9 +220,45 @@ public class MainTUI {
     private void handleInput() throws IOException {
         InputHandler.KeyEvent ev = InputHandler.read(terminal.reader());
 
+        // ── Completion popup intercepts ──
+        if (completion.isVisible()) {
+            switch (ev.action()) {
+                case ARROW_UP   -> { completion.moveUp(); return; }
+                case ARROW_DOWN -> { completion.moveDown(); return; }
+                case TAB, ENTER -> { acceptCompletion(); return; }
+                case ESCAPE     -> { completion.close(); return; }
+                case CHAR       -> {
+                    // Type-ahead: insert char and update filter
+                    getActiveEditor().insertChar(ev.ch());
+                    scheduleAutoSave();
+                    String prefix = wordBeforeCursor(getActiveEditor());
+                    completion.updateFilter(prefix, currentLang);
+                    return;
+                }
+                case BACKSPACE  -> {
+                    getActiveEditor().backspace();
+                    scheduleAutoSave();
+                    String prefix = wordBeforeCursor(getActiveEditor());
+                    if (prefix.isEmpty()) completion.close();
+                    else completion.updateFilter(prefix, currentLang);
+                    return;
+                }
+                default -> { completion.close(); } // any other key dismisses
+            }
+        }
+
         switch (ev.action()) {
-            case QUIT -> running = false;
-            case SAVE -> handleSaveFile();
+            case ESCAPE -> running = false; // ESC without popup = quit
+            case QUIT   -> running = false;
+            case SAVE   -> handleSaveFile();
+
+            // ── Completion trigger ──
+            case CTRL_SPACE -> {
+                if (isEditorActive()) {
+                    String prefix = wordBeforeCursor(getActiveEditor());
+                    completion.open(prefix, currentLang);
+                }
+            }
 
             // ── Panel switching (Ctrl+Arrow) ──
             case CTRL_UP    -> switchPanel(active >= 2 ? active - 2 : active);
@@ -243,6 +300,66 @@ public class MainTUI {
             int viewH = active == 1 ? Renderer.topViewH(H) : Renderer.botViewH(H);
             getActiveEditor().ensureVisible(viewW, viewH);
         }
+    }
+
+    /** Extract the word (identifier) immediately before the cursor. */
+    private String wordBeforeCursor(EditorState editor) {
+        String line = editor.getLine(editor.getCurLine());
+        int col = editor.getCurCol();
+        int start = col;
+        while (start > 0 && Character.isLetterOrDigit(line.charAt(start - 1))) start--;
+        return line.substring(start, col);
+    }
+
+    /** Accept the selected completion item and insert it into the editor. */
+    private void acceptCompletion() {
+        CompletionState.Item item = completion.accept();
+        if (item == null) return;
+
+        EditorState editor = getActiveEditor();
+        String line = editor.getLine(editor.getCurLine());
+        int col = editor.getCurCol();
+
+        // Find the prefix start
+        int start = col;
+        while (start > 0 && Character.isLetterOrDigit(line.charAt(start - 1))) start--;
+
+        // Replace prefix with the insert text
+        String insertText = item.insertText();
+        String before = line.substring(0, start);
+        String after = line.substring(col);
+
+        // Handle multi-line insertions (snippets)
+        String[] insertLines = insertText.split("\n", -1);
+        if (insertLines.length == 1) {
+            // Single line — simple replacement
+            editor.getLines().set(editor.getCurLine(), before + insertText + after);
+            // Position cursor at end of inserted text
+            int newCol = start + insertText.length();
+            // Use moveRight/moveLeft to set cursor position
+            while (editor.getCurCol() > newCol) editor.moveLeft(false);
+            while (editor.getCurCol() < newCol) editor.moveRight(false);
+        } else {
+            // Multi-line snippet: compute indent from current line
+            String indent = "";
+            for (int i = 0; i < before.length(); i++) {
+                if (before.charAt(i) == ' ') indent += " ";
+                else break;
+            }
+
+            // First line
+            editor.getLines().set(editor.getCurLine(), before + insertLines[0]);
+
+            // Middle + last lines
+            for (int i = 1; i < insertLines.length; i++) {
+                editor.getLines().add(editor.getCurLine() + i, indent + insertLines[i]);
+            }
+
+            // Append the remaining text after the snippet to the last line
+            int lastIdx = editor.getCurLine() + insertLines.length - 1;
+            editor.getLines().set(lastIdx, editor.getLines().get(lastIdx) + after);
+        }
+        scheduleAutoSave();
     }
 
     private boolean isEditorActive() { return active == 1 || active == 2; }

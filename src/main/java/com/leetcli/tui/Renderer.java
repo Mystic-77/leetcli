@@ -244,4 +244,105 @@ public final class Renderer {
         int dashLen = Math.max(0, w - 2 - text.length());
         return (active ? color : Theme.DIM) + "\u250c" + text + "\u2500".repeat(dashLen) + "\u2510" + Theme.RESET;
     }
+
+    // ── Completion popup overlay ──
+
+    /** Max visible items in the popup. */
+    private static final int POPUP_MAX_VISIBLE = 8;
+
+    /**
+     * Render the completion popup as an overlay at the given terminal row/col.
+     * Returns the ANSI string to append after the main frame.
+     *
+     * @param popup   the completion state
+     * @param termRow terminal row where the cursor is (1-indexed)
+     * @param termCol terminal column where the cursor is (1-indexed)
+     * @param maxH    maximum terminal height (to avoid going off-screen)
+     */
+    public static String renderPopup(CompletionState popup, int termRow, int termCol, int maxH) {
+        if (!popup.isVisible() || popup.getItems().isEmpty()) return "";
+
+        List<CompletionState.Item> items = popup.getItems();
+        int total = items.size();
+        int sel = popup.getSelectedIndex();
+
+        // Compute visible window around selection
+        int visCount = Math.min(total, POPUP_MAX_VISIBLE);
+        int scrollOff = 0;
+        if (sel >= visCount) scrollOff = sel - visCount + 1;
+        if (scrollOff + visCount > total) scrollOff = total - visCount;
+
+        // Compute popup width: max label + detail + padding
+        int maxLabel = 0, maxDetail = 0;
+        for (int i = scrollOff; i < scrollOff + visCount; i++) {
+            maxLabel = Math.max(maxLabel, items.get(i).label().length());
+            maxDetail = Math.max(maxDetail, items.get(i).detail().length());
+        }
+        int innerW = maxLabel + 2 + maxDetail; // label + gap + detail
+        int boxW = innerW + 2; // borders
+
+        // Place popup below cursor; shift up if it goes off-screen
+        int startRow = termRow + 1;
+        int boxH = visCount + 2; // borders
+        if (startRow + boxH > maxH) startRow = Math.max(1, termRow - boxH);
+
+        // Clamp column
+        int startCol = termCol;
+
+        StringBuilder buf = new StringBuilder();
+
+        // Top border
+        buf.append(Theme.ESC).append(startRow).append(";").append(startCol).append("H");
+        buf.append(Theme.POPUP_BG).append(Theme.POPUP_BORDER);
+        buf.append("\u250c").append("\u2500".repeat(innerW)).append("\u2510");
+
+        // Items
+        for (int i = 0; i < visCount; i++) {
+            int idx = scrollOff + i;
+            CompletionState.Item item = items.get(idx);
+            boolean isSel = (idx == sel);
+
+            buf.append(Theme.ESC).append(startRow + 1 + i).append(";").append(startCol).append("H");
+            buf.append(Theme.POPUP_BG).append(Theme.POPUP_BORDER).append("\u2502");
+
+            if (isSel) {
+                buf.append(Theme.POPUP_SEL_BG).append(Theme.POPUP_SEL_FG);
+            } else {
+                buf.append(Theme.POPUP_BG).append(Theme.POPUP_FG);
+            }
+
+            // Label (left-aligned)
+            String label = item.label();
+            buf.append(" ").append(label).append(" ".repeat(maxLabel - label.length())).append(" ");
+
+            // Detail (right-aligned, dimmed)
+            if (isSel) {
+                buf.append(Theme.POPUP_SEL_BG).append(Theme.POPUP_SEL_FG);
+            } else {
+                buf.append(Theme.POPUP_BG).append(Theme.POPUP_DETAIL);
+            }
+            String detail = item.detail();
+            buf.append(detail).append(" ".repeat(maxDetail - detail.length()));
+
+            buf.append(Theme.POPUP_BG).append(Theme.POPUP_BORDER).append("\u2502");
+        }
+
+        // Bottom border
+        buf.append(Theme.ESC).append(startRow + 1 + visCount).append(";").append(startCol).append("H");
+        buf.append(Theme.POPUP_BG).append(Theme.POPUP_BORDER);
+        buf.append("\u2514").append("\u2500".repeat(innerW)).append("\u2518");
+
+        // Scroll indicators
+        if (scrollOff > 0) {
+            buf.append(Theme.ESC).append(startRow).append(";").append(startCol + boxW).append("H");
+            buf.append(Theme.POPUP_BORDER).append("\u25b2"); // ▲
+        }
+        if (scrollOff + visCount < total) {
+            buf.append(Theme.ESC).append(startRow + boxH - 1).append(";").append(startCol + boxW).append("H");
+            buf.append(Theme.POPUP_BORDER).append("\u25bc"); // ▼
+        }
+
+        buf.append(Theme.RESET);
+        return buf.toString();
+    }
 }
