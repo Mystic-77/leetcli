@@ -162,11 +162,15 @@ public final class Renderer {
             if (color != curFg) {
                 curFg = color;
                 switch (color) {
-                    case SyntaxHighlighter.DEFAULT -> sb.append(Theme.ESC).append(Theme.FG_RGB);
-                    case SyntaxHighlighter.KEYWORD  -> sb.append(Theme.BLUE);
-                    case SyntaxHighlighter.STRING   -> sb.append(Theme.YELLOW);
-                    case SyntaxHighlighter.COMMENT  -> sb.append(Theme.GREY);
-                    case SyntaxHighlighter.NUMBER   -> sb.append(Theme.RED);
+                    case SyntaxHighlighter.DEFAULT    -> sb.append(Theme.ESC).append(Theme.FG_RGB);
+                    case SyntaxHighlighter.KEYWORD    -> sb.append(Theme.BLUE);
+                    case SyntaxHighlighter.STRING     -> sb.append(Theme.YELLOW);
+                    case SyntaxHighlighter.COMMENT    -> sb.append(Theme.GREY);
+                    case SyntaxHighlighter.NUMBER     -> sb.append(Theme.RED);
+                    case SyntaxHighlighter.TYPE       -> sb.append(Theme.TYPE_COLOR);
+                    case SyntaxHighlighter.ANNOTATION -> sb.append(Theme.ANNOTATION_COLOR);
+                    case SyntaxHighlighter.OPERATOR   -> sb.append(Theme.OPERATOR_COLOR);
+                    case SyntaxHighlighter.BRACKET    -> sb.append(Theme.BRACKET_COLOR);
                 }
             }
 

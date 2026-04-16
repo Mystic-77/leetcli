@@ -34,6 +34,20 @@ public final class Theme {
     public static final String RED     = ESC + "38;2;230;126;128m";
     public static final String GREY    = ESC + "38;2;122;132;120m";
 
+    // ── Syntax highlight accents ──
+    public static final String TYPE_COLOR       = ESC + "38;2;131;192;146m";  // cyan-green
+    public static final String ANNOTATION_COLOR = ESC + "38;2;214;153;182m";  // magenta-pink
+    public static final String OPERATOR_COLOR   = ESC + "38;2;230;152;117m";  // warm orange
+    public static final String BRACKET_COLOR    = ESC + "38;2;219;188;127m";  // gold
+
+    // ── Completion popup ──
+    public static final String POPUP_BG      = ESC + "48;2;55;65;72m";
+    public static final String POPUP_FG      = ESC + "38;2;211;198;170m";
+    public static final String POPUP_SEL_BG  = ESC + "48;2;127;187;179m";
+    public static final String POPUP_SEL_FG  = ESC + "38;2;45;53;59m";
+    public static final String POPUP_BORDER  = ESC + "38;2;133;146;137m";
+    public static final String POPUP_DETAIL  = ESC + "38;2;122;132;120m";
+
     // ── UI element styles ──
     public static final String TITLE_BG  = ESC + "48;2;127;187;179m" + ESC + "38;2;45;53;59m";
     public static final String STATUS_BG = ESC + "48;2;166;180;101m" + ESC + "38;2;45;53;59m";
